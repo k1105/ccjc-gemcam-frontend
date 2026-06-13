@@ -1,0 +1,202 @@
+/**
+ * タイムラインエディタのスモークテスト:
+ * D でエディタ起動 → タイムラインを開き、フレームステップ / スクラブの決定論性 /
+ * 再生 / クローズ時のカメラ復元とリソース解放を検証する。
+ *
+ *   VITE_MOCK=1 npx vite --port 5199 を起動した状態で
+ *   node scripts/smoke-timeline.mjs
+ */
+import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
+
+const BASE = process.env.SMOKE_URL || 'http://localhost:5199';
+const OUT = new URL('../.smoke/', import.meta.url).pathname;
+mkdirSync(OUT, { recursive: true });
+
+const browser = await chromium.launch({
+  args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+});
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+
+const errors = [];
+page.on('console', (msg) => msg.type() === 'error' && errors.push(msg.text()));
+page.on('pageerror', (err) => errors.push(String(err)));
+
+const shot = (name) => page.screenshot({ path: `${OUT}${name}.png` });
+const meminfo = () => page.evaluate(() => ({ ...window.app.ctx.world.renderer.info.memory }));
+const campos = () =>
+  page.evaluate(() => {
+    const c = window.app.ctx.world.camera;
+    return { x: c.position.x, y: c.position.y, z: c.position.z, fov: c.fov };
+  });
+
+let failed = 0;
+const assert = (cond, label) => {
+  console.log(`${cond ? 'OK ' : 'NG '} ${label}`);
+  if (!cond) failed++;
+};
+
+console.log('--- load');
+await page.goto(BASE);
+await page.waitForFunction(() => window.app?.ctx.manager.currentName === 'select');
+// SELECT 入場のカメラトゥイーン（1.2s）完了を待ってから基準値を取る
+await page.waitForFunction(() => {
+  const { world, choreo } = window.app.ctx;
+  const cfg = choreo.data.select.camera;
+  return Math.abs(world.camera.position.z - cfg.pos[2]) < 1e-3 && world.camera.fov === cfg.fov;
+});
+const camBefore = await campos();
+
+console.log('--- open editor (D) + timeline');
+await page.keyboard.press('D');
+await page.waitForFunction(() => !!window.app.editor);
+await page.waitForTimeout(800); // PathEditor の可視化が一度描画されるのを待つ
+const memBase = await meminfo(); // 基準=エディタ表示後（タイムライン開閉のリーク検出用）
+await page.evaluate(() => window.app.editor.timeline.open());
+await page.waitForFunction(() => window.app.editor.timeline.isOpen);
+await page.waitForTimeout(500);
+await shot('30-timeline-open');
+
+const baked = await page.evaluate(() => {
+  const b = window.app.editor.timeline.baked;
+  return {
+    totalFrames: b.totalFrames,
+    swapTime: b.swapTime,
+    phases: b.phases.map((p) => ({ id: p.id, type: p.type, frames: p.frameCount, markers: (p.markers ?? []).length })),
+  };
+});
+console.log('baked:', JSON.stringify(baked));
+assert(baked.totalFrames > 300, `ベイク済み (${baked.totalFrames} frames)`);
+assert(baked.phases.length === 4, '4フェーズ');
+assert(baked.swapTime !== null, 'swapTime(photoRecede終了)が確定');
+
+console.log('--- frame step determinism');
+const seek = (f) => page.evaluate((n) => window.app.editor.timeline._seek(n), f);
+await seek(120);
+const a = await campos();
+await seek(0);
+await seek(120);
+const b = await campos();
+assert(JSON.stringify(a) === JSON.stringify(b), 'frame120 へのシークが決定論的（往復一致）');
+await seek(121);
+const c = await campos();
+assert(JSON.stringify(a) !== JSON.stringify(c), '±1フレームでカメラ状態が変化');
+
+console.log('--- keyboard step');
+await page.keyboard.press('ArrowLeft');
+const d = await campos();
+assert(JSON.stringify(d) === JSON.stringify(a), '← で1フレーム戻る（=frame120）');
+
+console.log('--- scrub to follow phase (particles visible)');
+const followStart = await page.evaluate(() => {
+  const p = window.app.editor.timeline.baked.phases.find((x) => x.type === 'follow');
+  return p.startFrame + Math.floor(p.frameCount / 2);
+});
+await seek(followStart);
+await page.waitForTimeout(300);
+await shot('31-timeline-follow-mid');
+
+console.log('--- free (俯瞰) view');
+await page.keyboard.press('v');
+await page.waitForTimeout(400);
+const free = await page.evaluate(() => {
+  const tl = window.app.editor.timeline;
+  const cam = window.app.ctx.world.camera;
+  const i = Math.round(tl.frame) * 3;
+  const ghostMatchesBaked =
+    Math.abs(tl.ghost.position.x - tl.baked.pos[i]) < 1e-6 &&
+    Math.abs(tl.ghost.position.z - tl.baked.pos[i + 2]) < 1e-6;
+  const camAwayFromPath =
+    Math.hypot(cam.position.x - tl.baked.pos[i], cam.position.z - tl.baked.pos[i + 2]) > 1.0;
+  return {
+    mode: tl.viewMode,
+    helperVisible: tl.helper.visible,
+    trajLines: tl.traj.children.length,
+    ghostMatchesBaked,
+    camAwayFromPath,
+  };
+});
+assert(free.mode === 'free', 'V で俯瞰モードへ');
+assert(free.helperVisible, 'カメラヘルパー表示');
+assert(free.trajLines === 4, `軌跡ラインがフェーズ数ぶん (${free.trajLines})`);
+assert(free.ghostMatchesBaked, 'ゴーストがベイク位置に追従');
+assert(free.camAwayFromPath, '実カメラはパスから離れた俯瞰位置');
+await shot('34-timeline-free-view');
+await page.keyboard.press('v');
+await page.waitForTimeout(200);
+const backToCam = await page.evaluate(() => {
+  const tl = window.app.editor.timeline;
+  const cam = window.app.ctx.world.camera;
+  const i = Math.round(tl.frame) * 3;
+  return tl.viewMode === 'cam' && Math.abs(cam.position.x - tl.baked.pos[i]) < 1e-6;
+});
+assert(backToCam, 'V で演出カメラ視点へ復帰');
+
+console.log('--- play 1s');
+await page.keyboard.press(' ');
+await page.waitForTimeout(1000);
+const playing = await page.evaluate(() => window.app.editor.timeline.playing);
+assert(playing, 'Space で再生中');
+await page.keyboard.press(' ');
+await shot('32-timeline-playing');
+
+console.log('--- edit a path value -> auto rebake');
+const framesBefore = baked.totalFrames;
+await page.evaluate(() => {
+  const choreo = window.app.ctx.choreo;
+  choreo.data.generate.phases[0].duration = 4.0; // 3.0 -> 4.0
+  window.app.editor.timeline.invalidate();
+});
+await page.waitForTimeout(600);
+const framesAfter = await page.evaluate(() => window.app.editor.timeline.baked.totalFrames);
+assert(framesAfter === framesBefore + 60, `値変更で自動リベイク (${framesBefore} -> ${framesAfter})`);
+
+console.log('--- close (Esc): camera restore + resource release');
+await page.keyboard.press('Escape');
+await page.waitForFunction(() => !window.app.editor.timeline.isOpen);
+await page.waitForTimeout(800); // select ドリフト再開
+const camAfter = await campos();
+assert(Math.abs(camAfter.z - camBefore.z) < 0.01, `カメラz復元 (${camAfter.z.toFixed(3)})`);
+assert(camAfter.fov === camBefore.fov, 'fov 復元');
+const state = await page.evaluate(() => window.app.ctx.manager.currentName);
+assert(state === 'select', 'Esc がブースリセットに化けていない（select のまま）');
+// シーンにプレビュー残骸（写真プレーン/パーティクル/プレビューボトル）が無いこと
+const leftover = await page.evaluate(() => {
+  let points = 0;
+  window.app.ctx.world.scene.traverse((o) => {
+    if (o.isPoints) points++;
+  });
+  return points;
+});
+assert(leftover === 0, 'パーティクル(Points)がシーンに残っていない');
+const memCycle1 = await meminfo();
+await shot('33-timeline-closed');
+
+// 開閉サイクルを繰り返してもメモリが増えないこと（初回はギズモ等の初描画
+// アップロードがあるため、サイクル間の差分で判定する）
+console.log('--- 2nd open/seek/play/close cycle (leak check)');
+const runCycle = async () => {
+  await page.evaluate(() => window.app.editor.timeline.open());
+  await page.waitForFunction(() => window.app.editor.timeline.isOpen);
+  await page.waitForTimeout(400);
+  await seek(followStart);
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(700);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !window.app.editor.timeline.isOpen);
+  await page.waitForTimeout(300);
+};
+await runCycle();
+const memCycle2 = await meminfo();
+console.log('cycle1:', JSON.stringify(memCycle1), '-> cycle2:', JSON.stringify(memCycle2));
+assert(
+  memCycle2.geometries <= memCycle1.geometries && memCycle2.textures <= memCycle1.textures,
+  '開閉サイクルでジオメトリ/テクスチャが増えない（リークなし）'
+);
+
+const fatal = errors.filter((e) => !e.includes('favicon'));
+assert(fatal.length === 0, `コンソールエラーなし${fatal.length ? `: ${fatal.join(' | ')}` : ''}`);
+
+await browser.close();
+console.log(failed ? `\n${failed} 件失敗` : '\n全チェック通過');
+process.exit(failed ? 1 : 0);

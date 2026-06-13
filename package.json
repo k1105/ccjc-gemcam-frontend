@@ -1,0 +1,31 @@
+{
+  "name": "ccjc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server/index.js",
+    "booth": "concurrently -k -n vite,api \"vite\" \"node server/index.js\"",
+    "firebase:env": "node scripts/firebase-env.mjs",
+    "firebase:check": "node scripts/check-firebase.mjs",
+    "gemini:check": "node scripts/check-gemini.mjs",
+    "flow:check": "node scripts/check-flow.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "vite": "^8.0.12"
+  },
+  "dependencies": {
+    "@google/genai": "^1.30.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.0.0",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.0.0",
+    "gsap": "^3.15.0",
+    "lil-gui": "^0.21.0",
+    "three": "^0.184.0"
+  }
+}

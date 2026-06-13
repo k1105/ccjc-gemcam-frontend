@@ -1,0 +1,188 @@
+:root {
+  --bg-white: #f5f5f7;
+  --ink: #1d1d1f;
+  --ink-soft: #6e6e73;
+  font-family: 'Outfit', 'Noto Sans JP', sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-white);
+  color: var(--ink);
+  user-select: none;
+  cursor: none; /* booth: no pointer */
+}
+
+/* デバッグエディタ表示中はカーソルを戻す */
+body.editor-active,
+body.editor-active * {
+  cursor: auto !important;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* --- 3D canvas --- */
+#canvas-container {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+/* --- generic fullscreen screen overlay --- */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+/* --- SHOOT --- */
+#screen-shoot {
+  background: #000;
+}
+
+#webcam-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+#webcam-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 20px;
+  letter-spacing: 0.1em;
+}
+
+#shoot-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 9vh;
+  text-align: center;
+  color: #fff;
+  opacity: 0;
+  text-shadow: 0 2px 28px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+#shoot-caption .caption-main {
+  font-family: 'Noto Sans JP', sans-serif;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em; /* letter-spacing の右余白ぶんを相殺してセンタリング */
+}
+
+#shoot-caption .caption-sub {
+  margin-top: 14px;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+#countdown {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 300;
+  font-size: min(38vh, 38vw);
+  color: #fff;
+  text-shadow: 0 0 60px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+#countdown.tick {
+  animation: countdown-tick 0.95s ease-out forwards;
+}
+
+@keyframes countdown-tick {
+  0%   { opacity: 0; transform: scale(1.25); }
+  18%  { opacity: 1; transform: scale(1.0); }
+  80%  { opacity: 1; transform: scale(0.96); }
+  100% { opacity: 0; transform: scale(0.92); }
+}
+
+/* --- RESULT --- */
+#screen-result {
+  background: #ffffff;
+}
+
+#result-image {
+  /* transform ではなく margin:auto で中央寄せ（GSAP の y アニメと干渉させない） */
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-width: min(62vw, 70vh);
+  max-height: 70vh;
+  opacity: 0;
+}
+
+#result-text-bl {
+  position: absolute;
+  left: 4.5vw;
+  bottom: 5.5vh;
+  font-size: 13px;
+  line-height: 1.9;
+  letter-spacing: 0.14em;
+  color: var(--ink-soft);
+  opacity: 0;
+}
+
+#result-logo-tr {
+  position: absolute;
+  right: 4.5vw;
+  top: 5.5vh;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.3em;
+  color: var(--ink);
+  opacity: 0;
+}
+
+#result-logo-tr img {
+  display: block;
+  max-height: 9vh;
+  max-width: 18vw;
+}
+
+#result-brand-br {
+  position: absolute;
+  right: 4.5vw;
+  bottom: 5.5vh;
+  writing-mode: vertical-rl;
+  font-family: 'Noto Serif JP', 'Noto Sans JP', serif;
+  font-weight: 500;
+  font-size: 26px;
+  letter-spacing: 0.32em;
+  color: var(--ink);
+  opacity: 0;
+}
+
+/* --- flash / whiteout overlay --- */
+#flash-overlay {
+  position: fixed;
+  inset: 0;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 100;
+}

@@ -1,0 +1,197 @@
+import * as THREE from 'three';
+import { Sequence } from '../core/sequence-manager.js';
+import { TimerBag, disposeObject3D } from '../core/resources.js';
+import { PhotoParticles } from '../world/photo-particles.js';
+import { createBottle } from '../world/bottle-factory.js';
+
+/**
+ * GENERATE: 撮影写真が3D平面としてカメラから遠ざかり、パーティクルに分解されて
+ * 選択ボトルへ流れていく。カメラは hero パーティクルを追従し、ボトル付近を
+ * フライバイ → 生成完了まで周回 → プルバック → 閃光 → RESULT。
+ * choreography.json の generate.phases がカメラ編成を定義する。
+ */
+export class GenerateSequence extends Sequence {
+  async enter(payload) {
+    const { world, overlay, choreo, api, bottleRack, director } = this.ctx;
+    const { brand, apiSnapshotDataUrl, displayCanvas } = payload;
+    this.bag = new TimerBag();
+    this.brand = brand;
+    this.plane = null;
+    this.planeTexture = null;
+    this.particles = null;
+    this.bottle = null;
+
+    const gcfg = choreo.data.generate;
+    bottleRack.setVisible(false);
+    overlay.hideAll();
+
+    // --- カメラを phase0 開始位置へ即時セット（DOM白フラッシュが画面を覆っている間） ---
+    const ph0 = gcfg.phases[0];
+    world.camera.position.set(...ph0.path[0]);
+    world.camera.fov = ph0.fov ? ph0.fov[0] : world.camera.fov;
+    world.camera.updateProjectionMatrix();
+    const lookPoint = new THREE.Vector3(...ph0.lookAt.point);
+    director.syncLookFromCamera(lookPoint);
+    world.camera.lookAt(lookPoint);
+
+    // --- 写真平面: 現在のフラスタムを正確に満たすサイズで配置 ---
+    const planeCenter = lookPoint.clone();
+    const dist = world.camera.position.distanceTo(planeCenter);
+    const planeH = 2 * dist * Math.tan(THREE.MathUtils.degToRad(world.camera.fov) / 2);
+    const planeW = planeH * world.camera.aspect;
+
+    this.planeTexture = new THREE.CanvasTexture(displayCanvas);
+    this.planeTexture.colorSpace = THREE.SRGBColorSpace;
+    world.renderer.initTexture(this.planeTexture); // スワップ時のヒッチ防止
+
+    this.plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(planeW, planeH),
+      new THREE.MeshBasicMaterial({ map: this.planeTexture, toneMapped: false })
+    );
+    this.plane.position.copy(planeCenter);
+    world.scene.add(this.plane);
+
+    // --- ターゲットボトル（遠方に配置、生成完了の主役） ---
+    const BOTTLE_SCALE = gcfg.bottleScale ?? 1.6; // 遠景の主役なので少し大きく
+    const bottlePos = new THREE.Vector3(...gcfg.bottlePos);
+    const bottleCenter = bottlePos.clone().add(new THREE.Vector3(0, 0.4 * BOTTLE_SCALE, 0));
+    this.bottleCenter = bottleCenter;
+    createBottle(brand).then((model) => {
+      if (this.bag.disposed) return;
+      model.position.copy(bottlePos);
+      model.scale.setScalar(BOTTLE_SCALE);
+      world.scene.add(model);
+      this.bottle = model;
+    });
+
+    // --- パーティクル構築（追加は分解開始時） ---
+    this.particles = new PhotoParticles(world, gcfg.particles);
+    this.particles.buildFromCanvas(displayCanvas, {
+      planeCenter,
+      planeW,
+      planeH,
+      target: bottleCenter,
+    });
+
+    // --- カメラ追従ターゲット登録 ---
+    director.registerTarget('bottle', (out) => out.copy(bottleCenter));
+    director.registerTarget('heroParticle', (out) => this.particles.getHeroPosition(out));
+
+    // --- 生成APIは演出と並行して即時開始 ---
+    this.apiPromise = api.generateToyImage(brand.slug, apiSnapshotDataUrl, () => {});
+    // 本処理は _run 側で await する。それまでに reject した場合の未処理拒否警告を抑止
+    this.apiPromise.catch(() => {});
+
+    // 編成本体（exit 時に director.stop() で停止する）
+    this._run(gcfg).catch((err) => {
+      if (this.bag.disposed) return;
+      console.error('[Generate] failed', err);
+      this._fail();
+    });
+  }
+
+  async _run(gcfg) {
+    const { overlay, manager, director } = this.ctx;
+    let result = null;
+
+    // phases を順に再生。type:"loop"/"follow" が生成完了待ちのホールド点になる
+    for (const ph of gcfg.phases) {
+      if (this.bag.disposed) return;
+
+      if (ph.type === 'path') {
+        await director.playPhase(ph);
+        if (this.bag.disposed) return;
+        // 写真の後退が終わったら平面→パーティクルへスワップして分解開始
+        if (ph.id === 'photoRecede') this._swapToParticles();
+      } else {
+        const hold = ph.type === 'follow' ? director.playFollow(ph) : director.playLoop(ph);
+        try {
+          result = await this.apiPromise;
+        } catch (err) {
+          if (this.bag.disposed) return;
+          console.error('[Generate] API error', err);
+          this._fail();
+          return;
+        }
+        if (this.bag.disposed) return;
+        // リザルト画像を事前ロード（フェードインのポップ防止）
+        await preloadImage(result.imageUrl).catch(() => {});
+        if (this.bag.disposed) return;
+        await hold.release();
+      }
+    }
+    if (this.bag.disposed) return;
+
+    // ホールドフェーズの無い構成への保険
+    if (!result) {
+      try {
+        result = await this.apiPromise;
+      } catch (err) {
+        console.error('[Generate] API error', err);
+        this._fail();
+        return;
+      }
+    }
+
+    overlay.flashWhite({
+      inDur: 0.12,
+      hold: 0.15,
+      outDur: 0.8,
+      onWhite: () => manager.go('result', { result, brand: this.brand }),
+    });
+  }
+
+  _swapToParticles() {
+    const { world } = this.ctx;
+    world.scene.add(this.particles.points);
+    this.particles.start();
+    this.bag.add(() => this.particles.stopTicking());
+    if (this.plane) {
+      world.scene.remove(this.plane);
+      this.plane.geometry.dispose();
+      this.plane.material.dispose();
+      this.plane = null;
+    }
+  }
+
+  async _fail() {
+    const { overlay, manager } = this.ctx;
+    await overlay.setWhite(true, 0.5);
+    manager.reset('select');
+  }
+
+  async exit() {
+    const { world, director } = this.ctx;
+    director.stop();
+    director.clearTargets();
+    this.bag.disposeAll();
+
+    if (this.plane) {
+      world.scene.remove(this.plane);
+      this.plane.geometry.dispose();
+      this.plane.material.dispose();
+      this.plane = null;
+    }
+    if (this.planeTexture) {
+      this.planeTexture.dispose();
+      this.planeTexture = null;
+    }
+    if (this.particles) {
+      this.particles.dispose(world.scene);
+      this.particles = null;
+    }
+    if (this.bottle) {
+      disposeObject3D(this.bottle);
+      this.bottle = null;
+    }
+  }
+}
+
+function preloadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => (img.decode ? img.decode().then(resolve, resolve) : resolve());
+    img.onerror = reject;
+    img.src = url;
+  });
+}

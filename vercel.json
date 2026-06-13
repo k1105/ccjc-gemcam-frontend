@@ -1,0 +1,5 @@
+{
+  "buildCommand": "VITE_MOCK=1 VITE_MOCK_DELAY=3000 vite build",
+  "outputDirectory": "dist",
+  "framework": null
+}

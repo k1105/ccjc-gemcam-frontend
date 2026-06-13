@@ -1,0 +1,14 @@
+# デプロイに不要な大容量・サーバ専用ファイル
+node_modules
+dist
+.smoke
+images
+images_jp
+products_all
+products_all.zip
+*.py
+.env
+.env.*
+scripts
+server
+config

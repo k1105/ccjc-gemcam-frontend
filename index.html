@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CCJC Experience</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <!-- Fullscreen 3D canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- SHOOT: fullscreen mirrored webcam + caption + countdown -->
+    <div id="screen-shoot" class="screen hidden">
+      <video id="webcam-video" autoplay playsinline muted></video>
+      <div id="webcam-placeholder" class="hidden">
+        <p>カメラを起動中、または未接続です</p>
+      </div>
+      <div id="shoot-caption">
+        <p class="caption-main">写真を撮ります</p>
+        <p class="caption-sub">ENTER でカウントダウンが始まります</p>
+      </div>
+      <div id="countdown" class="hidden">3</div>
+    </div>
+
+    <!-- RESULT: bare image + staged typography -->
+    <div id="screen-result" class="screen hidden">
+      <img id="result-image" src="" alt="" draggable="false" />
+      <div id="result-text-bl">
+        <p>A moment, sealed in light.</p>
+        <p>Crafted from a single photograph,</p>
+        <p>bottled just for you.</p>
+      </div>
+      <div id="result-logo-tr">LOGO</div>
+      <div id="result-brand-br">ブランド名</div>
+    </div>
+
+    <!-- White flash / transition overlay -->
+    <div id="flash-overlay"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

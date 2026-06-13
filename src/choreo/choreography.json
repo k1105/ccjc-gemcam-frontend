@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "select": {
+    "rack": { "spacing": 0.62, "y": -0.45, "z": 0.0, "idleSwayAmp": 0.018, "idleSwaySpeed": 0.9 },
+    "sink": { "duration": 1.5, "rotations": 2.5, "dropY": -2.4, "ease": "power2.in", "preDelay": 0.15, "postDelay": 0.35 },
+    "return": { "perBottle": 0.55, "stagger": 0.16, "fromY": -2.6, "rotations": 1.0, "ease": "power3.out" },
+    "camera": { "pos": [0, 0.3, 4.6], "look": [0, 0.0, 0], "fov": 42, "driftAmp": 0.06, "driftSpeed": 0.25 }
+  },
+  "shoot": {
+    "countdownInterval": 1.0,
+    "postSnapDelay": 0.45
+  },
+  "generate": {
+    "particles": {
+      "grid": [200, 112],
+      "size": 0.018,
+      "sizeGrow": 6.0,
+      "surviveRatio": 0.04,
+      "rippleLead": 1.4,
+      "rippleAmp": 0.16,
+      "rippleFreq": [9.0, 6.0],
+      "rippleSpeed": 2.4,
+      "dissolveDelaySpread": 2.2,
+      "headLead": -0.1,
+      "flightDuration": 4.5,
+      "lateralRadius": 0.18,
+      "twist": 3.0,
+      "noiseAmp": 0.06,
+      "noiseFreq": 0.7,
+      "streamP1Offset": [0.6, 1.5, 0.8],
+      "streamP2Offset": [-0.8, -0.3, -0.6],
+      "helixRadius": 0.55,
+      "helixSpeed": 4.8,
+      "helixEntryY": 0.6,
+      "helixBobAmp": 0.04,
+      "helixBobFreq": 0.8,
+      "helixDescent": 0.28,
+      "helixDrop": 1.2,
+      "helixFade": 7.0
+    },
+    "photoDistance": 2.2,
+    "bottlePos": [10, 0.4, -6],
+    "bottleScale": 1.6,
+    "phases": [
+      {
+        "id": "photoRecede",
+        "type": "path",
+        "duration": 3.0,
+        "ease": "power2.inOut",
+        "path": [[0, 0.5, 2.2], [0, 0.62, 3.6], [0.5, 0.85, 5.2]],
+        "lookAt": { "mode": "fixed", "point": [0, 0.5, 0] },
+        "fov": [45, 50]
+      },
+      {
+        "id": "heroFollow",
+        "type": "path",
+        "duration": 5.6,
+        "ease": "none",
+        "path": [[0.5, 0.85, 5.2], [3.2, 1.6, 2.2], [6.5, 1.2, -1.5], [8.7, 0.9, -3.9]],
+        "lookAt": { "mode": "target", "target": "heroParticle", "lerp": 0.085 }
+      },
+      {
+        "id": "orbitFollow",
+        "type": "follow",
+        "target": "heroParticle",
+        "center": "bottle",
+        "radiusOffset": 0.15,
+        "angleLag": 0.85,
+        "heightOffset": 0.4,
+        "blendIn": 1.2,
+        "headHeightInfluence": 1.0,
+        "lookBlend": 0.9,
+        "posLerp": 0.22,
+        "minHold": 5.0,
+        "lookAt": { "mode": "target", "target": "heroParticle", "lerp": 0.45 }
+      },
+      {
+        "id": "pullBack",
+        "type": "path",
+        "duration": 2.2,
+        "ease": "power3.inOut",
+        "relativeTo": "bottle",
+        "path": ["@current", [0, 0.25, 2.0], [0, 0.1, 3.0]],
+        "lookAt": { "mode": "target", "target": "bottle", "lerp": 0.12 },
+        "fov": [50, 45],
+        "endFlash": true
+      }
+    ]
+  },
+  "result": {
+    "imageFadeIn": 0.9,
+    "stagger": [
+      { "el": "textBL", "delay": 0.7, "duration": 0.6, "y": 24, "ease": "power2.out" },
+      { "el": "logoTR", "delay": 0.95, "duration": 0.6, "y": -24, "ease": "power2.out" },
+      { "el": "brandBR", "delay": 1.2, "duration": 0.7, "x": 32, "ease": "power2.out" }
+    ],
+    "dwell": 8.0,
+    "outro": {
+      "imageSlideDown": 0.8,
+      "imageSlideEase": "power2.in",
+      "elementsStagger": 0.12,
+      "elementDuration": 0.45,
+      "whiteHold": 0.7
+    }
+  }
+}

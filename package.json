@@ -12,7 +12,8 @@
     "firebase:env": "node scripts/firebase-env.mjs",
     "firebase:check": "node scripts/check-firebase.mjs",
     "gemini:check": "node scripts/check-gemini.mjs",
-    "flow:check": "node scripts/check-flow.mjs"
+    "flow:check": "node scripts/check-flow.mjs",
+    "cam:check": "node scripts/check-camera-eval.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

@@ -1,8 +1,17 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
+import {
+  buildCurve,
+  samplePath,
+  applyLook,
+  FollowEvaluator,
+  LoopEvaluator,
+} from './camera-eval.js';
 
 const _look = new THREE.Vector3();
 const _pos = new THREE.Vector3();
+const _head = new THREE.Vector3();
+const _center = new THREE.Vector3();
 
 /**
  * choreography JSON の phase 定義（CatmullRom キーフレームパス）を再生するカメラ演出機。
@@ -21,6 +30,8 @@ export class CameraDirector {
     this._lookInitialized = false;
     this._activeTicks = new Set();
     this._activeTweens = new Set();
+    // camera-eval へ渡す注視ターゲット解決子（targets Map 経由）
+    this._resolve = (name, out) => this._resolveTarget(name, out);
   }
 
   registerTarget(name, supplier) {
@@ -43,13 +54,25 @@ export class CameraDirector {
   }
 
   _buildCurve(path, offset, closed = false) {
-    const pts = path.map((p) => {
-      if (p === '@current') return this.camera.position.clone();
-      const v = new THREE.Vector3(p[0], p[1], p[2]);
-      if (offset) v.add(offset);
-      return v;
-    });
-    return new THREE.CatmullRomCurve3(pts, closed, 'centripetal');
+    return buildCurve(path, offset, closed, this.camera.position);
+  }
+
+  /** targets Map から注視/オフセット供給元を解決（camera-eval 用） */
+  _resolveTarget(name, out) {
+    const supplier = this.targets.get(name);
+    if (!supplier) return null;
+    supplier(out);
+    return out;
+  }
+
+  /** camera-eval.applyLook の lookInit オプション（初回 snap で不連続を防ぐ） */
+  _lookOpts() {
+    return {
+      initialized: this._lookInitialized,
+      onInit: () => {
+        this._lookInitialized = true;
+      },
+    };
   }
 
   _resolveOffset(phase) {
@@ -65,30 +88,8 @@ export class CameraDirector {
   }
 
   _applyLook(lookCfg, dt) {
-    let targetPoint = null;
-    if (lookCfg.mode === 'fixed') {
-      _look.set(lookCfg.point[0], lookCfg.point[1], lookCfg.point[2]);
-      targetPoint = _look;
-    } else if (lookCfg.mode === 'target') {
-      const supplier = this.targets.get(lookCfg.target);
-      if (supplier) {
-        supplier(_look);
-        targetPoint = _look;
-      }
-    }
-    if (!targetPoint) return;
-
-    if (!this._lookInitialized) this.syncLookFromCamera(targetPoint);
-
-    const lerp = lookCfg.lerp ?? 1.0;
-    if (lerp >= 1.0) {
-      this.lookCurrent.copy(targetPoint);
-    } else {
-      // フレームレート非依存の指数平滑
-      const k = 1 - Math.pow(1 - lerp, dt * 60);
-      this.lookCurrent.lerp(targetPoint, k);
-    }
-    this.camera.lookAt(this.lookCurrent);
+    const target = applyLook(lookCfg, dt, this.lookCurrent, this._resolve, this._lookOpts());
+    if (target) this.camera.lookAt(this.lookCurrent);
   }
 
   /** 一方向パスを再生して完了で resolve */
@@ -101,10 +102,11 @@ export class CameraDirector {
 
     return new Promise((resolve) => {
       const tick = (dt) => {
-        curve.getPointAt(Math.min(state.t, 1), _pos);
+        // state.t は gsap tween が ease 適用済みで駆動する eased 進行度
+        const fov = samplePath(curve, state.t, fovFrom, fovTo, _pos);
         this.camera.position.copy(_pos);
-        if (fovFrom !== null) {
-          this.camera.fov = fovFrom + (fovTo - fovFrom) * state.t;
+        if (fov !== null) {
+          this.camera.fov = fov;
           this.camera.updateProjectionMatrix();
         }
         this._applyLook(phase.lookAt, dt);
@@ -135,35 +137,16 @@ export class CameraDirector {
   playLoop(phase) {
     const offset = this._resolveOffset(phase);
     const curve = this._buildCurve(phase.path, offset, phase.closed !== false);
-    const blendDur = 0.7; // 進入時のブレンド秒数
-    const entryPos = this.camera.position.clone();
-
-    let progress = 0; // 累積（mod せず保持: minHoldProgress 判定用）
-    let blend = 0;
-    let releasing = false;
-    let releaseTarget = null;
+    const ev = new LoopEvaluator(phase, curve, this.camera.position);
     let resolveFn = null;
 
     const tick = (dt) => {
-      if (!releasing) {
-        progress += dt / phase.loopDuration;
-      } else {
-        // 脱出点へ向けて減速気味に進める
-        const remaining = releaseTarget - progress;
-        const step = Math.max(remaining * dt * 2.5, dt / phase.loopDuration * 0.5);
-        progress = Math.min(progress + step, releaseTarget);
-      }
+      const target = ev.step(dt, this.camera.position, this.lookCurrent, this._resolve, {
+        lookOpts: this._lookOpts(),
+      });
+      if (target) this.camera.lookAt(this.lookCurrent);
 
-      curve.getPointAt(progress % 1, _pos);
-      if (blend < 1) {
-        blend = Math.min(blend + dt / blendDur, 1);
-        const e = blend * blend * (3 - 2 * blend); // smoothstep
-        _pos.lerpVectors(entryPos, _pos, e);
-      }
-      this.camera.position.copy(_pos);
-      this._applyLook(phase.lookAt, dt);
-
-      if (releasing && progress >= releaseTarget - 1e-4) {
+      if (ev.done) {
         this.world.removeTickable(tick);
         this._activeTicks.delete(tick);
         resolveFn();
@@ -176,12 +159,7 @@ export class CameraDirector {
       release: () => {
         return new Promise((resolve) => {
           resolveFn = resolve;
-          const minP = phase.minHoldProgress ?? 0;
-          const n = phase.exitPoints ?? 4;
-          const base = Math.max(progress, minP);
-          // base 以降で最寄りの k/n 地点へ
-          releaseTarget = Math.ceil(base * n + 1e-6) / n;
-          releasing = true;
+          ev.beginRelease(); // 呼び出し時点の progress から最寄り exitPoint を確定
         });
       },
     };
@@ -197,86 +175,36 @@ export class CameraDirector {
    * release() で resolve（後続 pullBack の "@current" が連続性を引き受ける）。
    */
   playFollow(phase) {
-    const head = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    const rel = new THREE.Vector3();
+    const ev = new FollowEvaluator(phase);
     let resolveFn = null;
     let releasing = false;
-    let elapsed = 0;
-    // カメラ極座標状態（進入時に実位置から初期化）と進入時の実オフセット
-    let inited = false;
-    let camAng = 0;
-    let camRad = 0;
-    let camHgt = 0;
-    let lag0 = 0;
-    let radOff0 = 0;
-    let hgt0 = 0;
 
     const tick = (dt) => {
-      elapsed += dt;
+      // 追従ターゲット（先鋒）と周回中心（ボトル）を毎フレーム解決
       const headSup = this.targets.get(phase.target);
       const centerSup = this.targets.get(phase.center);
+      let head = null;
+      let center = null;
       if (headSup && centerSup) {
-        headSup(head);
-        centerSup(center);
-
-        rel.copy(head).sub(center);
-        rel.y = 0;
-        const distHead = rel.length();
-        const angHead = Math.atan2(rel.z, rel.x);
-        const hgtHead = (head.y - center.y) * (phase.headHeightInfluence ?? 0.5);
-
-        if (!inited) {
-          // 進入時のカメラ実位置を極座標で採取。実オフセットから設定オフセットへ
-          // blendIn 秒で移行することで、phase 切替時の desired の飛び（鞭打ち）を防ぐ
-          const rx = this.camera.position.x - center.x;
-          const rz = this.camera.position.z - center.z;
-          camRad = Math.hypot(rx, rz);
-          camAng = Math.atan2(rz, rx);
-          camHgt = this.camera.position.y - center.y;
-          lag0 = wrapNear(angHead - camAng, phase.angleLag ?? 0);
-          radOff0 = camRad - distHead;
-          hgt0 = camHgt - hgtHead;
-          inited = true;
-        }
-
-        // 進入時オフセット → 設定値へ smoothstep で移行
-        const b = Math.min(elapsed / (phase.blendIn ?? 1.2), 1);
-        const s = b * b * (3 - 2 * b);
-        const lag = lag0 + ((phase.angleLag ?? 0) - lag0) * s;
-        const radOff = radOff0 + ((phase.radiusOffset ?? 1.0) - radOff0) * s;
-        const hgtOff = hgt0 + ((phase.heightOffset ?? 0.2) - hgt0) * s;
-
-        // 極座標で平滑化: 螺旋進入時の角速度の急変・半径の急縮みをならし、
-        // 軌道は常に center まわりの円弧として描かれる
-        const k = 1 - Math.pow(1 - (phase.posLerp ?? 0.06), dt * 60);
-        camAng += wrapPi(angHead - lag - camAng) * k;
-        camRad += (distHead + radOff - camRad) * k;
-        camHgt += (hgtHead + hgtOff - camHgt) * k;
-
-        this.camera.position.set(
-          center.x + Math.cos(camAng) * camRad,
-          center.y + camHgt,
-          center.z + Math.sin(camAng) * camRad
-        );
+        headSup(_head);
+        centerSup(_center);
+        head = _head;
+        center = _center;
       }
-
-      // lookBlend: 注視点をボトル中心(0)〜先鋒(1) の線上に置く。
-      // 先鋒は粒1個で被写体として見えないため、先鋒だけを注視すると
-      // 画面中央が空きボトルが端に追いやられる。両者をフレームに収める配分
-      if (phase.lookBlend != null) {
-        _look.copy(center).lerp(head, phase.lookBlend);
-        if (!this._lookInitialized) this.syncLookFromCamera(_look);
-        const lookLerp = phase.lookAt?.lerp ?? 0.1;
-        const k2 = 1 - Math.pow(1 - lookLerp, dt * 60);
-        this.lookCurrent.lerp(_look, k2);
-        this.camera.lookAt(this.lookCurrent);
-      } else {
-        this._applyLook(phase.lookAt, dt);
-      }
+      // 極座標の平滑化・blendIn・lookBlend は FollowEvaluator が担う
+      const target = ev.step(
+        dt,
+        head,
+        center,
+        this.camera.position,
+        this.lookCurrent,
+        this._resolve,
+        this._lookOpts()
+      );
+      if (target) this.camera.lookAt(this.lookCurrent);
 
       // 生成が速く終わっても minHold 秒は周回を見せてから抜ける
-      if (releasing && elapsed >= (phase.minHold ?? 0)) {
+      if (releasing && ev.elapsed >= (phase.minHold ?? 0)) {
         this.world.removeTickable(tick);
         this._activeTicks.delete(tick);
         resolveFn();
@@ -303,14 +231,4 @@ export class CameraDirector {
     this._activeTweens.clear();
     this._lookInitialized = false;
   }
-}
-
-/** 角度を (-π, π] に正規化 */
-function wrapPi(a) {
-  return ((((a + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) - Math.PI;
-}
-
-/** 角度 a を、ref から ±π 以内の表現に直す（ブレンドが最短経路を通るように） */
-function wrapNear(a, ref) {
-  return ref + wrapPi(a - ref);
 }

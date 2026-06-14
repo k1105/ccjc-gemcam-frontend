@@ -18,6 +18,10 @@ const _rel = new THREE.Vector3();
 const _look2 = new THREE.Vector3();
 const _pa = new THREE.Vector3();
 const _pb = new THREE.Vector3();
+const _qa = new THREE.Quaternion();
+const _qb = new THREE.Quaternion();
+const _m4 = new THREE.Matrix4();
+const _upv = new THREE.Vector3(0, 1, 0);
 
 /** 角度を (-π, π] に正規化 */
 export function wrapPi(a) {
@@ -195,6 +199,48 @@ export function smoothToPoint(lookCurrent, point, lerp, dt, opts) {
   const l = lerp ?? 1.0;
   if (l >= 1.0) lookCurrent.copy(point);
   else lookCurrent.lerp(point, 1 - Math.pow(1 - l, dt * 60));
+}
+
+// ---- 自由回転（Phase3b: quaternion キーフレーム） ----
+// 向きトラックに quat キーが1つでもあれば「free モード」とし、向きを quaternion で
+// 評価する（roll を含むため look 点では表現できない）。aim キー(point/target)は
+// camPos からの lookAt 回転に変換して slerp に混ぜる。
+
+/** 向きトラックが自由回転(quat)キーを含むか */
+export function hasFreeOrientation(keys) {
+  return keys.some((k) => Array.isArray(k.quat));
+}
+
+/** キーの目標 quaternion を解決（quat はそのまま、aim は camPos→点 の lookAt 回転）。null なら不能 */
+function keyQuat(key, camPos, resolveTarget, out) {
+  if (Array.isArray(key.quat)) {
+    return out.set(key.quat[0], key.quat[1], key.quat[2], key.quat[3]).normalize();
+  }
+  const p = resolveKeyPoint(key, resolveTarget, _pa);
+  if (!p) return null;
+  _m4.lookAt(camPos, p, _upv); // camera.lookAt と同じ（カメラは eye=camPos, target=p）
+  return out.setFromRotationMatrix(_m4);
+}
+
+/** quat キーフレーム列から u 時点の目標 quaternion を slerp 内挿。null なら不能 */
+export function sampleOrientationQuat(keys, u, resolveTarget, camPos, out) {
+  const { a, b, f } = segAt(keys, u);
+  const qa = keyQuat(a, camPos, resolveTarget, _qa);
+  if (!qa) return null;
+  if (a === b || f <= 0) return out.copy(qa);
+  const qb = keyQuat(b, camPos, resolveTarget, _qb) ?? qa;
+  return out.slerpQuaternions(qa, qb, f);
+}
+
+/** currentQuat を targetQuat へ指数平滑 slerp（smoothToPoint の quaternion 版） */
+export function smoothQuat(currentQuat, targetQuat, lerp, dt, opts) {
+  if (opts && opts.initialized === false) {
+    currentQuat.copy(targetQuat);
+    opts.onInit?.();
+  }
+  const l = lerp ?? 1.0;
+  if (l >= 1.0) currentQuat.copy(targetQuat);
+  else currentQuat.slerp(targetQuat, 1 - Math.pow(1 - l, dt * 60));
 }
 
 /**

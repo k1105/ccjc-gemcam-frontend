@@ -5,8 +5,11 @@ import {
   samplePath,
   applyLook,
   isKeyedOrientation,
+  hasFreeOrientation,
   sampleAimPoint,
+  sampleOrientationQuat,
   smoothToPoint,
+  smoothQuat,
   FollowEvaluator,
   LoopEvaluator,
 } from './camera-eval.js';
@@ -15,6 +18,7 @@ const _look = new THREE.Vector3();
 const _pos = new THREE.Vector3();
 const _head = new THREE.Vector3();
 const _center = new THREE.Vector3();
+const _q = new THREE.Quaternion();
 
 /**
  * choreography JSON の phase 定義（CatmullRom キーフレームパス）を再生するカメラ演出機。
@@ -95,10 +99,21 @@ export class CameraDirector {
     if (target) this.camera.lookAt(this.lookCurrent);
   }
 
-  /** 向き評価。keys があれば u（線形フェーズ進行）で aim キーフレーム内挿、無ければ従来の単一 lookAt */
+  /**
+   * 向き評価。keys があれば u（線形フェーズ進行）でキーフレーム評価:
+   * - quat キーを含む → free モード（quaternion を slerp して camera.quaternion に適用）
+   * - それ以外 → aim 注視点内挿（camera.lookAt）
+   * keys が無ければ従来の単一 lookAt。
+   */
   _applyOrientation(lookCfg, u, dt) {
     if (isKeyedOrientation(lookCfg)) {
-      const pt = sampleAimPoint(lookCfg.keys, u, this._resolve, _look);
+      const keys = lookCfg.keys;
+      if (hasFreeOrientation(keys)) {
+        const q = sampleOrientationQuat(keys, u, this._resolve, this.camera.position, _q);
+        if (q) smoothQuat(this.camera.quaternion, q, lookCfg.lerp, dt);
+        return;
+      }
+      const pt = sampleAimPoint(keys, u, this._resolve, _look);
       if (pt) {
         smoothToPoint(this.lookCurrent, pt, lookCfg.lerp, dt, this._lookOpts());
         this.camera.lookAt(this.lookCurrent);

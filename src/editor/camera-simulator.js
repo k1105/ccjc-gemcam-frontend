@@ -5,8 +5,11 @@ import {
   samplePath,
   applyLook,
   isKeyedOrientation,
+  hasFreeOrientation,
   sampleAimPoint,
+  sampleOrientationQuat,
   smoothToPoint,
+  smoothQuat,
   FollowEvaluator,
   LoopEvaluator,
 } from '../core/camera-eval.js';
@@ -34,6 +37,11 @@ const MAX_PHASE_FRAMES = 120 * FPS; // 暴走保険
 
 const _head = new THREE.Vector3();
 const _aim = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _recQuat = new THREE.Quaternion();
+const _lookM = new THREE.Matrix4();
+const _fwd = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
 
 /**
  * @param {object} gcfg choreo.data.generate
@@ -58,6 +66,7 @@ export function bakeGenerateCamera(gcfg, env) {
   const state = {
     pos: new THREE.Vector3(),
     lookCurrent: new THREE.Vector3(...ph0Look),
+    quat: new THREE.Quaternion(), // 現在の向き（free 平滑化の起点・出力 quat チャンネル）
     fov: ph0.fov ? ph0.fov[0] : 45,
     time: 0,
     swapTime: null, // photoRecede 終了 = パーティクル開始時刻
@@ -69,6 +78,7 @@ export function bakeGenerateCamera(gcfg, env) {
   const posArr = [];
   const lookArr = [];
   const fovArr = [];
+  const quatArr = [];
   const phaseInfos = [];
 
   const particleTime = () => (state.swapTime === null ? 0 : Math.max(0, state.time - state.swapTime));
@@ -80,21 +90,41 @@ export function bakeGenerateCamera(gcfg, env) {
     return null;
   };
 
-  // 向き評価（keys があれば aim キーフレーム内挿、無ければ従来の単一 lookAt）。
-  // u は線形フェーズ進行（位置イージングとは独立）。lookInitialized は enter 済み前提。
+  // 向き評価。keys に quat があれば free モード（quaternion を slerp、返り値=目標quat）、
+  // aim キーがあれば注視点内挿、無ければ従来の単一 lookAt。u は線形フェーズ進行。
+  // 返り値: free モードのときその quaternion、それ以外は null（record で look から quat を導出）。
   const applyOrientationSim = (lookCfg, u, dt) => {
     if (isKeyedOrientation(lookCfg)) {
-      const pt = sampleAimPoint(lookCfg.keys, u, resolveTarget, _aim);
+      const keys = lookCfg.keys;
+      if (hasFreeOrientation(keys)) {
+        const q = sampleOrientationQuat(keys, u, resolveTarget, state.pos, _q);
+        if (q) {
+          smoothQuat(state.quat, q, lookCfg.lerp, dt);
+          // look チャンネル整合: 前方ベクトルで pos→look を作る（俯瞰の look-line 用）
+          _fwd.set(0, 0, -1).applyQuaternion(state.quat);
+          state.lookCurrent.copy(state.pos).addScaledVector(_fwd, 2);
+          return state.quat;
+        }
+        return null;
+      }
+      const pt = sampleAimPoint(keys, u, resolveTarget, _aim);
       if (pt) smoothToPoint(state.lookCurrent, pt, lookCfg.lerp, dt);
     } else {
       applyLook(lookCfg, dt, state.lookCurrent, resolveTarget);
     }
+    return null;
   };
 
-  const record = () => {
+  // freeQuat があればそれを向きとして記録、無ければ pos→lookCurrent の lookAt から導出。
+  // いずれにせよ state.quat に現在の向きを残す（次フェーズの free 平滑化の起点になる）。
+  const record = (freeQuat) => {
     posArr.push(state.pos.x, state.pos.y, state.pos.z);
     lookArr.push(state.lookCurrent.x, state.lookCurrent.y, state.lookCurrent.z);
     fovArr.push(state.fov);
+    if (freeQuat) _recQuat.copy(freeQuat);
+    else _recQuat.setFromRotationMatrix(_lookM.lookAt(state.pos, state.lookCurrent, UP));
+    quatArr.push(_recQuat.x, _recQuat.y, _recQuat.z, _recQuat.w);
+    state.quat.copy(_recQuat);
   };
 
   // パス構築（camera-eval.buildCurve へ委譲。relativeTo/'@current' を解決）
@@ -136,6 +166,7 @@ export function bakeGenerateCamera(gcfg, env) {
     pos: new Float32Array(posArr),
     look: new Float32Array(lookArr),
     fov: new Float32Array(fovArr),
+    quat: new Float32Array(quatArr), // フレーム毎の向き（4成分/フレーム。roll を含む）
     phases: phaseInfos,
   };
 
@@ -163,9 +194,9 @@ export function bakeGenerateCamera(gcfg, env) {
       const uLin = Math.min((f * DT) / phase.duration, 1); // 線形進行（向きキー用）
       const fov = samplePath(curve, t, fovFrom, fovTo, state.pos);
       if (fov !== null) state.fov = fov;
-      applyOrientationSim(phase.lookAt, uLin, DT);
+      const freeQ = applyOrientationSim(phase.lookAt, uLin, DT);
       state.time += DT;
-      record();
+      record(freeQ);
       for (const m of pending) {
         if (m.frame === undefined && Math.min(t, 1) >= m.u - 1e-6) {
           m.frame = info.startFrame + f;

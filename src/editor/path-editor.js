@@ -283,13 +283,38 @@ export class PathEditor {
       .name('time t（0..1）')
       .onChange(() => this._onOriTimeChanged(k));
 
-    const proxy = { type: k.target != null ? 'target' : 'point' };
+    const curType = k.quat != null ? 'free' : k.target != null ? 'target' : 'point';
+    const proxy = { type: curType };
     this.oriFolder
-      .add(proxy, 'type', ['point', 'target'])
+      .add(proxy, 'type', ['point', 'target', 'free'])
       .name('aim type')
       .onChange((t) => this._setOriType(t));
 
-    if (k.target != null) {
+    if (k.quat != null) {
+      // 自由回転: euler(度)で編集（quat は内部表現）。現在のカメラ向きを取り込むボタンも
+      const e = new THREE.Euler().setFromQuaternion(new THREE.Quaternion(...k.quat), 'YXZ');
+      const pr = {
+        x: THREE.MathUtils.radToDeg(e.x),
+        y: THREE.MathUtils.radToDeg(e.y),
+        z: THREE.MathUtils.radToDeg(e.z),
+      };
+      const apply = () => {
+        const q = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(
+            THREE.MathUtils.degToRad(pr.x),
+            THREE.MathUtils.degToRad(pr.y),
+            THREE.MathUtils.degToRad(pr.z),
+            'YXZ'
+          )
+        );
+        k.quat = [+q.x.toFixed(5), +q.y.toFixed(5), +q.z.toFixed(5), +q.w.toFixed(5)];
+        this.onChanged?.();
+      };
+      ['x', 'y', 'z'].forEach((ax) =>
+        this.oriFolder.add(pr, ax, -180, 180, 0.5).name(`rot ${ax}°`).onChange(apply)
+      );
+      this.oriFolder.add({ cap: () => this._captureView(k) }, 'cap').name('Capture current view');
+    } else if (k.target != null) {
       this.oriFolder
         .add(k, 'target', ORI_TARGETS)
         .name('target')
@@ -312,6 +337,14 @@ export class PathEditor {
           })
       );
     }
+  }
+
+  /** 現在のエディタカメラの向きを free キーに取り込む */
+  _captureView(k) {
+    const q = this.ctx.world.camera.quaternion;
+    k.quat = [+q.x.toFixed(5), +q.y.toFixed(5), +q.z.toFixed(5), +q.w.toFixed(5)];
+    this._buildOriPanel();
+    this.onChanged?.();
   }
 
   /** t 変更で順序が変わりうるので整列し、選択を同じキーへ追従 */
@@ -355,7 +388,12 @@ export class PathEditor {
     const cur = keys[i];
     const next = keys[i + 1];
     const t = next ? (cur.t + next.t) / 2 : Math.min(cur.t + 0.25, 1);
-    const nk = cur.target != null ? { t, target: cur.target } : { t, point: cur.point ? [...cur.point] : this._defaultAim() };
+    const nk =
+      cur.quat != null
+        ? { t, quat: [...cur.quat] }
+        : cur.target != null
+          ? { t, target: cur.target }
+          : { t, point: cur.point ? [...cur.point] : this._defaultAim() };
     nk.t = Number(t.toFixed(3));
     keys.splice(i + 1, 0, nk);
     this._sortOriKeys();
@@ -390,12 +428,21 @@ export class PathEditor {
   _setOriType(type) {
     const k = this._oriKeys()[this.state.oriKey];
     if (!k) return;
-    if (type === 'target' && k.target == null) {
+    if (type === 'target') {
       delete k.point;
-      k.target = ORI_TARGETS[0];
-    } else if (type === 'point' && k.point == null) {
+      delete k.quat;
+      if (k.target == null) k.target = ORI_TARGETS[0];
+    } else if (type === 'point') {
       delete k.target;
-      k.point = this._defaultAim();
+      delete k.quat;
+      if (k.point == null) k.point = this._defaultAim();
+    } else if (type === 'free') {
+      delete k.point;
+      delete k.target;
+      if (k.quat == null) {
+        const q = this.ctx.world.camera.quaternion; // 現在のカメラ向きを初期値に
+        k.quat = [+q.x.toFixed(5), +q.y.toFixed(5), +q.z.toFixed(5), +q.w.toFixed(5)];
+      }
     }
     this.sel = { kind: 'anchor', side: null };
     this._buildOriPanel();

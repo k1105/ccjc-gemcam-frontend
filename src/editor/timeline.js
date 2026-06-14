@@ -181,7 +181,8 @@ export class Timeline {
       this.ghost.position.set(px, py, pz);
       this.ghost.fov = b.fov[i];
       this.ghost.updateProjectionMatrix();
-      this.ghost.lookAt(lx, ly, lz);
+      if (b.quat) this.ghost.quaternion.fromArray(b.quat, i * 4);
+      else this.ghost.lookAt(lx, ly, lz);
       this.ghost.updateMatrixWorld(true);
       this.helper.update();
       const attr = this.lookLine.geometry.attributes.position;
@@ -198,7 +199,8 @@ export class Timeline {
         world.camera.fov = b.fov[i];
         world.camera.updateProjectionMatrix();
       }
-      world.camera.lookAt(lx, ly, lz);
+      if (b.quat) world.camera.quaternion.fromArray(b.quat, i * 4);
+      else world.camera.lookAt(lx, ly, lz);
     }
     this.stage.setTime(i / FPS, b.swapTime);
   }

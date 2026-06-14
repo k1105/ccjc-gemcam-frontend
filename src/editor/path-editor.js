@@ -49,7 +49,7 @@ export class PathEditor {
     this.handles = []; // 選択中キーフレームの in/out ハンドル球
     this.handleLines = null; // ハンドル接続線
     this.line = null;
-    this.kfControllers = [];
+    this.kfPanel = null; // 選択中キーフレームの数値パネル参照
 
     this.tc = new TransformControls(ctx.world.camera, ctx.world.renderer.domElement);
     this.tcHelper = this.tc.getHelper();
@@ -79,7 +79,7 @@ export class PathEditor {
     this.gui.add(this.state, 'addKeyframe').name('+ keyframe（選択の直後に挿入）');
     this.gui.add(this.state, 'removeKeyframe').name('− keyframe（選択を削除）');
 
-    this.kfFolder = this.gui.addFolder('Keyframes');
+    this.kfFolder = this.gui.addFolder('Selected keyframe');
     this.rebuild();
   }
 
@@ -121,43 +121,81 @@ export class PathEditor {
     const phase = this._currentPhase();
     if (!phase) return;
 
-    this.kfFolder.destroy();
-    this.kfFolder = this.gui.addFolder('Keyframes');
-    this.kfControllers = [];
-
-    phase.path.forEach((entry, i) => {
-      if (entry === '@current') {
-        const dummy = { info: '@current（実行時カメラ位置）' };
-        this.kfFolder.add(dummy, 'info').name(`#${i}`).disable();
-        return;
-      }
-      const pos = kfPos(entry);
-      const proxy = { x: pos.x, y: pos.y, z: pos.z };
-      const ctrls = ['x', 'y', 'z'].map((axis, ai) =>
-        this.kfFolder
-          .add(proxy, axis, -20, 20, 0.01)
-          .name(`#${i}.${axis}`)
-          .onChange((v) => {
-            this._setAnchor(i, ai, v);
-            this._syncSphere(i);
-            if (i === this.state.keyframe) this._redrawHandles();
-            this._rebuildLine();
-            this.onChanged?.();
-          })
-      );
-      this.kfControllers.push({ index: i, proxy, ctrls });
-    });
-
-    const editable = this.kfControllers.map((k) => k.index);
+    const editable = phase.path.map((e, i) => (e === '@current' ? -1 : i)).filter((i) => i >= 0);
     this.state.keyframe = editable.includes(this.state.keyframe) ? this.state.keyframe : editable[0] ?? 0;
+    this.sel = { kind: 'anchor', side: null };
+
+    // Edit keyframe ドロップダウン更新（値は updateDisplay で反映し onChange は発火させない）
     this.kfSelectCtrl = this.kfSelectCtrl
       .options(editable.length ? editable : [0])
       .name('Edit keyframe')
       .onChange(() => this._selectAnchor());
-    this.kfSelectCtrl.setValue(this.state.keyframe);
+    this.kfSelectCtrl.updateDisplay();
 
     this._rebuildViz();
+    this._buildKfPanel();
     this._syncManualToggle();
+  }
+
+  /**
+   * 選択中キーフレーム「1つだけ」の数値パネルを構築する。
+   * pos.x/y/z（必要なら handle in/out のデルタ x/y/z）のみを表示し、全KF羅列をやめて見やすくする。
+   */
+  _buildKfPanel() {
+    this.kfFolder.destroy();
+    this.kfFolder = this.gui.addFolder('Selected keyframe');
+    this.kfPanel = null;
+
+    const phase = this._currentPhase();
+    const i = this.state.keyframe;
+    const entry = phase?.path[i];
+    if (!entry) return;
+
+    this.kfFolder.add({ index: `#${i} / ${phase.path.length - 1}` }, 'index').name('index').disable();
+
+    if (entry === '@current') {
+      this.kfFolder
+        .add({ info: '実行時カメラ位置（編集不可）' }, 'info')
+        .name('type')
+        .disable();
+      return;
+    }
+
+    const pos = kfPos(entry);
+    const posProxy = { x: pos.x, y: pos.y, z: pos.z };
+    const posCtrls = ['x', 'y', 'z'].map((ax, ai) =>
+      this.kfFolder
+        .add(posProxy, ax, -20, 20, 0.01)
+        .name(`pos ${ax}`)
+        .onChange((v) => {
+          this._setAnchor(i, ai, v);
+          this._syncSphere(i);
+          this._redrawHandles();
+          this._rebuildLine();
+          this.onChanged?.();
+        })
+    );
+    this.kfPanel = { index: i, posProxy, posCtrls };
+
+    if (this._isManual(entry)) {
+      for (const side of ['out', 'in']) {
+        const key = side === 'in' ? 'hIn' : 'hOut';
+        const h = kfHandle(entry, key) ?? new THREE.Vector3();
+        const proxy = { x: h.x, y: h.y, z: h.z };
+        const f = this.kfFolder.addFolder(side === 'in' ? 'handle in (Δ from pos)' : 'handle out (Δ from pos)');
+        const ctrls = ['x', 'y', 'z'].map((ax, ai) =>
+          f.add(proxy, ax, -10, 10, 0.01)
+            .name(ax)
+            .onChange((v) => {
+              this._setHandle(i, key, ai, v);
+              this._redrawHandles();
+              this._rebuildLine();
+              this.onChanged?.();
+            })
+        );
+        this.kfPanel[side] = { proxy, ctrls };
+      }
+    }
   }
 
   /** path[i] のアンカー軸を書き込む（auto=配列 / manual=オブジェクト両対応） */
@@ -166,6 +204,13 @@ export class PathEditor {
     const r = Number(v.toFixed(3));
     if (Array.isArray(entry)) entry[axis] = r;
     else entry.p[axis] = r;
+  }
+
+  /** path[i] のハンドル（hIn/hOut）デルタ軸を書き込む */
+  _setHandle(i, key, axis, v) {
+    const entry = this._currentPhase().path[i];
+    if (!Array.isArray(entry[key])) entry[key] = [0, 0, 0];
+    entry[key][axis] = Number(v.toFixed(3));
   }
 
   _isManual(entry) {
@@ -371,6 +416,7 @@ export class PathEditor {
     this.sel = { kind: 'anchor', side: null };
     this._rebuildHandles();
     this._attachGizmo();
+    this._buildKfPanel();
     this._syncManualToggle();
   }
 
@@ -414,6 +460,8 @@ export class PathEditor {
     this._rebuildHandles();
     this._rebuildLine();
     this._attachGizmo();
+    this._buildKfPanel();
+    this._syncManualToggle();
     this.onChanged?.();
   }
 
@@ -443,6 +491,13 @@ export class PathEditor {
         Number(delta.y.toFixed(3)),
         Number(delta.z.toFixed(3)),
       ];
+      // パネルのハンドル数値を同期（選択中KFのみ）
+      const side = ud.side;
+      if (this.kfPanel?.index === ud.kfIndex && this.kfPanel[side]) {
+        const pr = this.kfPanel[side].proxy;
+        [pr.x, pr.y, pr.z] = entry[key];
+        this.kfPanel[side].ctrls.forEach((c) => c.updateDisplay());
+      }
       this._redrawHandles(); // 接続線のみ更新（球は tc が動かしているので作り直さない）
       this._rebuildLine();
       this.onChanged?.();
@@ -457,12 +512,12 @@ export class PathEditor {
     if (Array.isArray(entry)) phase.path[i] = p;
     else entry.p = p;
 
-    const ctl = this.kfControllers.find((k) => k.index === i);
-    if (ctl) {
-      ctl.proxy.x = p[0];
-      ctl.proxy.y = p[1];
-      ctl.proxy.z = p[2];
-      ctl.ctrls.forEach((c) => c.updateDisplay());
+    // パネルの pos 数値を同期（選択中KFのみ）
+    if (this.kfPanel?.index === i) {
+      this.kfPanel.posProxy.x = p[0];
+      this.kfPanel.posProxy.y = p[1];
+      this.kfPanel.posProxy.z = p[2];
+      this.kfPanel.posCtrls.forEach((c) => c.updateDisplay());
     }
     this._redrawHandles(); // ハンドル球はアンカー相対なので追従（dispose せず再配置）
     this._rebuildLine();

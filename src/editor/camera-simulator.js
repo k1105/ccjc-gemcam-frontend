@@ -10,6 +10,8 @@ import {
   sampleOrientationQuat,
   smoothToPoint,
   smoothQuat,
+  controlPointArcFractions,
+  buildKeyframeAimKeys,
   FollowEvaluator,
   LoopEvaluator,
 } from '../core/camera-eval.js';
@@ -90,25 +92,29 @@ export function bakeGenerateCamera(gcfg, env) {
     return null;
   };
 
-  // 向き評価。keys に quat があれば free モード（quaternion を slerp、返り値=目標quat）、
-  // aim キーがあれば注視点内挿、無ければ従来の単一 lookAt。u は線形フェーズ進行。
+  // 向き評価。優先順位:
+  //  1) lookAt.keys（手書き向きトラック。free=quaternion / aim=注視点。u=線形進行）
+  //  2) キーフレーム注視点オーバーライド aimKeys（posParam=eased進行で補間。エディタ既定）
+  //  3) 従来の単一 lookAt
   // 返り値: free モードのときその quaternion、それ以外は null（record で look から quat を導出）。
-  const applyOrientationSim = (lookCfg, u, dt) => {
+  const applyOrientationSim = (lookCfg, aimKeys, uLin, posParam, dt) => {
     if (isKeyedOrientation(lookCfg)) {
       const keys = lookCfg.keys;
       if (hasFreeOrientation(keys)) {
-        const q = sampleOrientationQuat(keys, u, resolveTarget, state.pos, _q);
+        const q = sampleOrientationQuat(keys, uLin, resolveTarget, state.pos, _q);
         if (q) {
           smoothQuat(state.quat, q, lookCfg.lerp, dt);
-          // look チャンネル整合: 前方ベクトルで pos→look を作る（俯瞰の look-line 用）
           _fwd.set(0, 0, -1).applyQuaternion(state.quat);
           state.lookCurrent.copy(state.pos).addScaledVector(_fwd, 2);
           return state.quat;
         }
         return null;
       }
-      const pt = sampleAimPoint(keys, u, resolveTarget, _aim);
+      const pt = sampleAimPoint(keys, uLin, resolveTarget, _aim);
       if (pt) smoothToPoint(state.lookCurrent, pt, lookCfg.lerp, dt);
+    } else if (aimKeys) {
+      const pt = sampleAimPoint(aimKeys, posParam, resolveTarget, _aim);
+      if (pt) smoothToPoint(state.lookCurrent, pt, lookCfg?.lerp, dt);
     } else {
       applyLook(lookCfg, dt, state.lookCurrent, resolveTarget);
     }
@@ -182,6 +188,7 @@ export function bakeGenerateCamera(gcfg, env) {
 
     // キーフレーム通過位置マーカー（弧長割合 → ease 逆引き）
     const us = controlPointArcFractions(curve);
+    const aimKeys = buildKeyframeAimKeys(phase, us); // 注視点オーバーライド（無ければ null）
     const pending = us.map((u, kf) => ({
       u,
       kf,
@@ -191,10 +198,11 @@ export function bakeGenerateCamera(gcfg, env) {
 
     for (let f = 1; f <= frames; f++) {
       const t = easeFn(Math.min((f * DT) / phase.duration, 1));
-      const uLin = Math.min((f * DT) / phase.duration, 1); // 線形進行（向きキー用）
+      const uLin = Math.min((f * DT) / phase.duration, 1); // 線形進行（lookAt.keys用）
       const fov = samplePath(curve, t, fovFrom, fovTo, state.pos);
       if (fov !== null) state.fov = fov;
-      const freeQ = applyOrientationSim(phase.lookAt, uLin, DT);
+      // posParam=t（eased進行＝getPointAt の引数）で注視点オーバーライドを補間
+      const freeQ = applyOrientationSim(phase.lookAt, aimKeys, uLin, Math.min(t, 1), DT);
       state.time += DT;
       record(freeQ);
       for (const m of pending) {
@@ -243,31 +251,3 @@ export function bakeGenerateCamera(gcfg, env) {
   }
 }
 
-/**
- * 各キーフレーム（制御点/アンカー）の「曲線全長に対する弧長割合 u」。
- * getPointAt(u) は弧長パラメータなので、ease(t)>=u となった瞬間が通過フレーム。
- * CatmullRomCurve3 と（ベジェの）CurvePath の両方に対応。
- */
-function controlPointArcFractions(curve) {
-  // CurvePath（ベジェ連結）: サブカーブの累積長からアンカー割合を出す
-  if (Array.isArray(curve.curves)) {
-    const lens = curve.getCurveLengths(); // 累積長（length = curves.length）
-    const total = lens[lens.length - 1] || 1;
-    // アンカー0=0, アンカーi=lens[i-1]/total。開path なら末尾アンカーは 1
-    return [0, ...lens.map((l) => l / total)];
-  }
-
-  const n = curve.points.length;
-  if (n < 2) return [0];
-  const divisions = 200;
-  const lengths = curve.getLengths(divisions); // index i = パラメータ t=i/divisions までの弧長
-  const total = lengths[divisions] || 1;
-  return curve.points.map((_, i) => {
-    const t = curve.closed ? i / n : i / (n - 1);
-    const fi = t * divisions;
-    const i0 = Math.floor(fi);
-    const frac = fi - i0;
-    const len = i0 >= divisions ? total : lengths[i0] + (lengths[i0 + 1] - lengths[i0]) * frac;
-    return len / total;
-  });
-}

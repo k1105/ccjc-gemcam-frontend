@@ -10,6 +10,8 @@ import {
   sampleOrientationQuat,
   smoothToPoint,
   smoothQuat,
+  controlPointArcFractions,
+  buildKeyframeAimKeys,
   FollowEvaluator,
   LoopEvaluator,
 } from './camera-eval.js';
@@ -105,17 +107,24 @@ export class CameraDirector {
    * - それ以外 → aim 注視点内挿（camera.lookAt）
    * keys が無ければ従来の単一 lookAt。
    */
-  _applyOrientation(lookCfg, u, dt) {
+  _applyOrientation(lookCfg, aimKeys, uLin, posParam, dt) {
     if (isKeyedOrientation(lookCfg)) {
       const keys = lookCfg.keys;
       if (hasFreeOrientation(keys)) {
-        const q = sampleOrientationQuat(keys, u, this._resolve, this.camera.position, _q);
+        const q = sampleOrientationQuat(keys, uLin, this._resolve, this.camera.position, _q);
         if (q) smoothQuat(this.camera.quaternion, q, lookCfg.lerp, dt);
         return;
       }
-      const pt = sampleAimPoint(keys, u, this._resolve, _look);
+      const pt = sampleAimPoint(keys, uLin, this._resolve, _look);
       if (pt) {
         smoothToPoint(this.lookCurrent, pt, lookCfg.lerp, dt, this._lookOpts());
+        this.camera.lookAt(this.lookCurrent);
+      }
+    } else if (aimKeys) {
+      // キーフレーム注視点オーバーライド（posParam=eased進行で補間）
+      const pt = sampleAimPoint(aimKeys, posParam, this._resolve, _look);
+      if (pt) {
+        smoothToPoint(this.lookCurrent, pt, lookCfg?.lerp, dt, this._lookOpts());
         this.camera.lookAt(this.lookCurrent);
       }
     } else {
@@ -127,10 +136,11 @@ export class CameraDirector {
   playPhase(phase) {
     const offset = this._resolveOffset(phase);
     const curve = this._buildCurve(phase.path, offset);
+    const aimKeys = buildKeyframeAimKeys(phase, controlPointArcFractions(curve)); // 注視点オーバーライド
     const state = { t: 0 };
     const fovFrom = phase.fov ? phase.fov[0] : null;
     const fovTo = phase.fov ? phase.fov[1] : null;
-    let elapsed = 0; // 線形フェーズ進行（向きキー用。位置イージングとは独立）
+    let elapsed = 0; // 線形フェーズ進行（lookAt.keys用。位置イージングとは独立）
 
     return new Promise((resolve) => {
       const tick = (dt) => {
@@ -142,7 +152,8 @@ export class CameraDirector {
           this.camera.updateProjectionMatrix();
         }
         elapsed += dt;
-        this._applyOrientation(phase.lookAt, Math.min(elapsed / phase.duration, 1), dt);
+        // posParam=state.t（eased＝getPointAt の引数）でキーフレーム注視点を補間
+        this._applyOrientation(phase.lookAt, aimKeys, Math.min(elapsed / phase.duration, 1), state.t, dt);
       };
       this.world.addTickable(tick);
       this._activeTicks.add(tick);

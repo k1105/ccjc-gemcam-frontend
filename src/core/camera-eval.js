@@ -190,6 +190,62 @@ export function sampleAimPoint(keys, u, resolveTarget, out) {
   return out.copy(pa).lerp(pb, f);
 }
 
+/**
+ * 各キーフレーム（制御点/アンカー）の「曲線全長に対する弧長割合 u」。
+ * getPointAt(u) は弧長パラメータなので、ease(t)>=u となった瞬間が通過点。
+ * CatmullRomCurve3 と（ベジェの）CurvePath の両方に対応。
+ */
+export function controlPointArcFractions(curve) {
+  if (Array.isArray(curve.curves)) {
+    const lens = curve.getCurveLengths();
+    const total = lens[lens.length - 1] || 1;
+    return [0, ...lens.map((l) => l / total)];
+  }
+  const n = curve.points.length;
+  if (n < 2) return [0];
+  const divisions = 200;
+  const lengths = curve.getLengths(divisions);
+  const total = lengths[divisions] || 1;
+  return curve.points.map((_, i) => {
+    const t = curve.closed ? i / n : i / (n - 1);
+    const fi = t * divisions;
+    const i0 = Math.floor(fi);
+    const frac = fi - i0;
+    const len = i0 >= divisions ? total : lengths[i0] + (lengths[i0 + 1] - lengths[i0]) * frac;
+    return len / total;
+  });
+}
+
+/** path のキーフレームに注視点オーバーライド(look)が1つでもあるか */
+export function hasKeyframeAim(path) {
+  return path.some((e) => e && e !== '@current' && !Array.isArray(e) && Array.isArray(e.look));
+}
+
+/**
+ * キーフレーム注視点オーバーライドを aim キー列へ変換する（既存 sampleAimPoint で評価できる形）。
+ * 各キーフレーム i の時刻 t = そのキーフレームの弧長割合 fracs[i]（=カメラが通過する位置進行）。
+ * look を持つキーはその点、持たないキーはフェーズ既定 lookAt（point/target）を採用する。
+ * → カメラがキーフレーム間を進むのに合わせて注視点が補間される。
+ * @returns aim キー配列、または look が無ければ null
+ */
+export function buildKeyframeAimKeys(phase, fracs) {
+  const path = phase.path;
+  if (!hasKeyframeAim(path)) return null;
+  const lc = phase.lookAt;
+  const def = Array.isArray(lc?.point)
+    ? { point: lc.point }
+    : lc?.target
+      ? { target: lc.target }
+      : { point: [0, 0.5, 0] };
+  return path.map((e, i) => {
+    const t = fracs[i] ?? (path.length > 1 ? i / (path.length - 1) : 0);
+    if (e && e !== '@current' && !Array.isArray(e) && Array.isArray(e.look)) {
+      return { t, point: e.look };
+    }
+    return { t, ...def };
+  });
+}
+
 /** lookCurrent を point へ指数平滑（applyLook と同式。aim キーフレーム評価用） */
 export function smoothToPoint(lookCurrent, point, lerp, dt, opts) {
   if (opts && opts.initialized === false) {

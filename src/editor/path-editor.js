@@ -1,29 +1,27 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { buildCurve, kfPos, kfHandle, isKeyedOrientation } from '../core/camera-eval.js';
+import { buildCurve, kfPos, kfHandle } from '../core/camera-eval.js';
 
 const _ndc = new THREE.Vector2();
 
 const SELECTED_COLOR = 0xffd166;
 const NORMAL_COLOR = 0xff4060;
 const HANDLE_COLOR = 0x46d3ff;
-const ORI_COLOR = 0x7cffb0; // 注視点(aim)キーフレーム
-const ORI_SEL_COLOR = 0xffd166;
-const ORI_TARGETS = ['bottle', 'heroParticle']; // 既知の追従ターゲット
+const AIM_COLOR = 0x7cffb0; // 注視点(look)オーバーライド
 
 /**
  * generate.phases のカメラパスを 3Dビューポート上で編集するツール。
- * - キーフレーム球（アンカー）をクリック選択 / TransformControls でドラッグ / 数値スライダー編集
- * - 各キーフレームは auto（CatmullRom 自動接線）/ manual（ベジェ in/out ハンドル）を切替可能。
- *   manual のキーフレームを選択するとビューポートに in/out ハンドル球＋接続線が出る。
- *   ハンドルもクリック選択してドラッグでき、アンカーからの相対デルタとして保存される。
- * - パス曲線の Line は camera-eval.buildCurve で生成（手動ハンドルがあればベジェ表示）。
- * - パス変更は onChanged コールバックで通知（タイムラインの自動リベイク用）。
- * "@current" キーフレームは実行時のカメラ位置に置換されるため編集対象外。
+ * - 位置キーフレーム（アンカー）: クリック選択 / TransformControls ドラッグ / 数値編集
+ * - ベジェ: 各キーフレームを auto（CatmullRom自動接線）/ manual（in/out ハンドル）で切替
+ * - 注視点(look)オーバーライド: 各キーフレームに任意で注視点を持たせられる。緑のポインタ球を
+ *   ビューポートでドラッグして「このキーフレーム付近ではここを見る」を指定。カメラが
+ *   キーフレーム間を進むのに合わせて注視点が補間される（look 未指定のキーはフェーズ既定 lookAt）。
+ * - 曲線/向きの評価は camera-eval（本番と共通）。パス変更は onChanged で通知（タイムライン自動リベイク）。
+ * "@current" キーフレームは実行時カメラ位置に置換されるため編集対象外。
  *
  * データ形:
- *   auto   … [x,y,z]
- *   manual … { p:[x,y,z], hIn:[dx,dy,dz], hOut:[dx,dy,dz] }（hIn/hOut は p からの相対デルタ）
+ *   auto              … [x,y,z]
+ *   manual / look付き  … { p:[x,y,z], hIn?, hOut?, look?:[lx,ly,lz] }
  */
 export class PathEditor {
   constructor(ctx, parentGui) {
@@ -32,14 +30,13 @@ export class PathEditor {
     this.active = false;
     this.onChanged = null;
 
-    // 選択対象: アンカー or ハンドル（side: 'in'|'out'）
-    this.sel = { kind: 'anchor', side: null };
+    this.sel = { kind: 'anchor', side: null }; // 'anchor' | 'handle'(side) | 'aim'
 
     this.state = {
       phaseId: this._phases()[0]?.id ?? '',
       keyframe: 0,
       manual: false,
-      oriKey: 0, // 選択中の向き(aim)キーフレーム index
+      lookOverride: false,
       preview: () => this._preview(),
       addKeyframe: () => this._addKeyframe(),
       removeKeyframe: () => this._removeKeyframe(),
@@ -49,12 +46,12 @@ export class PathEditor {
     this.viz.visible = false;
     ctx.world.scene.add(this.viz);
     this.spheres = []; // アンカー球
-    this.handles = []; // 選択中キーフレームの in/out ハンドル球
-    this.handleLines = null; // ハンドル接続線
-    this.line = null;
-    this.kfPanel = null; // 選択中キーフレームの数値パネル参照
-    this.oriSpheres = []; // 向き(aim) point キーの球
-    this.oriLine = null; // aim キーの連結線
+    this.handles = []; // 選択中KFの in/out ハンドル球
+    this.handleLines = null;
+    this.line = null; // パス曲線
+    this.aimSphere = null; // 選択中KFの注視点ポインタ
+    this.aimLine = null; // KF位置→注視点 の線
+    this.kfPanel = null;
 
     this.tc = new TransformControls(ctx.world.camera, ctx.world.renderer.domElement);
     this.tcHelper = this.tc.getHelper();
@@ -80,12 +77,15 @@ export class PathEditor {
       .add(this.state, 'manual')
       .name('Bezier handles（選択KFを auto/manual）')
       .onChange(() => this._toggleManual());
+    this.lookCtrl = this.gui
+      .add(this.state, 'lookOverride')
+      .name('look override（選択KFの注視点）')
+      .onChange(() => this._toggleLookOverride());
     this.gui.add(this.state, 'preview').name('▶ Preview phase（実時間再生）');
     this.gui.add(this.state, 'addKeyframe').name('+ keyframe（選択の直後に挿入）');
     this.gui.add(this.state, 'removeKeyframe').name('− keyframe（選択を削除）');
 
     this.kfFolder = this.gui.addFolder('Selected keyframe');
-    this.oriFolder = this.gui.addFolder('Orientation (aim)');
     this.rebuild();
   }
 
@@ -106,12 +106,26 @@ export class PathEditor {
     return new THREE.Vector3(...g.bottlePos).add(new THREE.Vector3(0, 0.4 * scale, 0));
   }
 
-  /** 編集対象キーフレームの local 位置（'@current' は camera 実位置 − offset で近似） */
   _localPos(entry) {
     if (entry === '@current') {
       return this.ctx.world.camera.position.clone().sub(this._offset());
     }
     return kfPos(entry);
+  }
+
+  _isManual(entry) {
+    return !!(kfHandle(entry, 'hIn') || kfHandle(entry, 'hOut'));
+  }
+
+  _hasLook(entry) {
+    return !!(entry && entry !== '@current' && !Array.isArray(entry) && Array.isArray(entry.look));
+  }
+
+  /** フェーズ既定 lookAt の点（look override 初期値） */
+  _defaultAimPoint() {
+    const lc = this._currentPhase()?.lookAt;
+    const p = Array.isArray(lc?.point) ? lc.point : [0, 0.5, 0];
+    return p.map((v) => Number(v.toFixed(3)));
   }
 
   setActive(active) {
@@ -131,7 +145,6 @@ export class PathEditor {
     this.state.keyframe = editable.includes(this.state.keyframe) ? this.state.keyframe : editable[0] ?? 0;
     this.sel = { kind: 'anchor', side: null };
 
-    // Edit keyframe ドロップダウン更新（値は updateDisplay で反映し onChange は発火させない）
     this.kfSelectCtrl = this.kfSelectCtrl
       .options(editable.length ? editable : [0])
       .name('Edit keyframe')
@@ -140,18 +153,46 @@ export class PathEditor {
 
     this._rebuildViz();
     this._buildKfPanel();
-    this._buildOriPanel();
-    this._syncManualToggle();
+    this._syncToggles();
+  }
+
+  /** 選択KFの状態に合わせて manual / lookOverride チェックを同期 */
+  _syncToggles() {
+    const entry = this._currentPhase()?.path[this.state.keyframe];
+    const isKf = entry && entry !== '@current';
+    this.state.manual = isKf ? this._isManual(entry) : false;
+    this.state.lookOverride = isKf ? this._hasLook(entry) : false;
+    this.manualCtrl?.updateDisplay();
+    this.manualCtrl?.enable(!!isKf);
+    this.lookCtrl?.updateDisplay();
+    this.lookCtrl?.enable(!!isKf);
+  }
+
+  /** path[i] のアンカー軸を書き込む（auto=配列 / object 両対応） */
+  _setAnchor(i, axis, v) {
+    const entry = this._currentPhase().path[i];
+    const r = Number(v.toFixed(3));
+    if (Array.isArray(entry)) entry[axis] = r;
+    else entry.p[axis] = r;
+  }
+
+  /** path[i] のハンドル（hIn/hOut）デルタ軸を書き込む */
+  _setHandle(i, key, axis, v) {
+    const entry = this._currentPhase().path[i];
+    if (!Array.isArray(entry[key])) entry[key] = [0, 0, 0];
+    entry[key][axis] = Number(v.toFixed(3));
   }
 
   /**
    * 選択中キーフレーム「1つだけ」の数値パネルを構築する。
-   * pos.x/y/z（必要なら handle in/out のデルタ x/y/z）のみを表示し、全KF羅列をやめて見やすくする。
+   * pos.x/y/z（manual なら handle in/out のデルタ、look override なら注視点 x/y/z）。
    */
   _buildKfPanel() {
     this.kfFolder.destroy();
     this.kfFolder = this.gui.addFolder('Selected keyframe');
     this.kfPanel = null;
+    this.aimProxy = null;
+    this.aimCtrls = null;
 
     const phase = this._currentPhase();
     const i = this.state.keyframe;
@@ -161,10 +202,7 @@ export class PathEditor {
     this.kfFolder.add({ index: `#${i} / ${phase.path.length - 1}` }, 'index').name('index').disable();
 
     if (entry === '@current') {
-      this.kfFolder
-        .add({ info: '実行時カメラ位置（編集不可）' }, 'info')
-        .name('type')
-        .disable();
+      this.kfFolder.add({ info: '実行時カメラ位置（編集不可）' }, 'info').name('type').disable();
       return;
     }
 
@@ -178,6 +216,7 @@ export class PathEditor {
           this._setAnchor(i, ai, v);
           this._syncSphere(i);
           this._redrawHandles();
+          this._redrawAim();
           this._rebuildLine();
           this.onChanged?.();
         })
@@ -203,316 +242,23 @@ export class PathEditor {
         this.kfPanel[side] = { proxy, ctrls };
       }
     }
-  }
 
-  /** path[i] のアンカー軸を書き込む（auto=配列 / manual=オブジェクト両対応） */
-  _setAnchor(i, axis, v) {
-    const entry = this._currentPhase().path[i];
-    const r = Number(v.toFixed(3));
-    if (Array.isArray(entry)) entry[axis] = r;
-    else entry.p[axis] = r;
-  }
-
-  /** path[i] のハンドル（hIn/hOut）デルタ軸を書き込む */
-  _setHandle(i, key, axis, v) {
-    const entry = this._currentPhase().path[i];
-    if (!Array.isArray(entry[key])) entry[key] = [0, 0, 0];
-    entry[key][axis] = Number(v.toFixed(3));
-  }
-
-  // ---- 向き（aim）キーフレーム ----
-
-  _lookCfg() {
-    return this._currentPhase()?.lookAt;
-  }
-
-  _oriKeyed() {
-    return isKeyedOrientation(this._lookCfg());
-  }
-
-  _oriKeys() {
-    return this._lookCfg()?.keys ?? [];
-  }
-
-  _defaultAim() {
-    return [0, 0.5, 0];
-  }
-
-  _sortOriKeys() {
-    const keys = this._oriKeys();
-    keys.sort((a, b) => a.t - b.t);
-  }
-
-  /** 選択中の向きキー数値パネル + 操作 UI を構築 */
-  _buildOriPanel() {
-    this.oriFolder.destroy();
-    this.oriFolder = this.gui.addFolder('Orientation (aim)');
-    this.oriPointProxy = null;
-    this.oriPointCtrls = null;
-    const phase = this._currentPhase();
-    if (!phase) return;
-
-    const keyed = this._oriKeyed();
-    this.oriFolder
-      .add({ on: keyed }, 'on')
-      .name('Use keyframes（向きをキー化）')
-      .onChange((v) => this._enableOriKeyframes(v));
-
-    if (!keyed) {
-      this.oriFolder.add({ info: '単一 lookAt（従来）' }, 'info').name('mode').disable();
-      return;
-    }
-
-    const lc = this._lookCfg();
-    if (typeof lc.lerp !== 'number') lc.lerp = 1.0;
-    this.oriFolder.add(lc, 'lerp', 0, 1, 0.005).name('smooth lerp').onChange(() => this.onChanged?.());
-
-    const keys = this._oriKeys();
-    this.state.oriKey = Math.min(Math.max(this.state.oriKey, 0), keys.length - 1);
-    this.oriSelectCtrl = this.oriFolder
-      .add(this.state, 'oriKey', keys.map((_, i) => i))
-      .name('Edit ori key')
-      .onChange(() => this._selectOriKey(this.state.oriKey));
-    this.oriFolder.add({ add: () => this._addOriKey() }, 'add').name('+ ori key');
-    this.oriFolder.add({ rm: () => this._removeOriKey() }, 'rm').name('− ori key');
-
-    const k = keys[this.state.oriKey];
-    if (!k) return;
-    this.oriFolder
-      .add(k, 't', 0, 1, 0.001)
-      .name('time t（0..1）')
-      .onChange(() => this._onOriTimeChanged(k));
-
-    const curType = k.quat != null ? 'free' : k.target != null ? 'target' : 'point';
-    const proxy = { type: curType };
-    this.oriFolder
-      .add(proxy, 'type', ['point', 'target', 'free'])
-      .name('aim type')
-      .onChange((t) => this._setOriType(t));
-
-    if (k.quat != null) {
-      // 自由回転: euler(度)で編集（quat は内部表現）。現在のカメラ向きを取り込むボタンも
-      const e = new THREE.Euler().setFromQuaternion(new THREE.Quaternion(...k.quat), 'YXZ');
-      const pr = {
-        x: THREE.MathUtils.radToDeg(e.x),
-        y: THREE.MathUtils.radToDeg(e.y),
-        z: THREE.MathUtils.radToDeg(e.z),
-      };
-      const apply = () => {
-        const q = new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(
-            THREE.MathUtils.degToRad(pr.x),
-            THREE.MathUtils.degToRad(pr.y),
-            THREE.MathUtils.degToRad(pr.z),
-            'YXZ'
-          )
-        );
-        k.quat = [+q.x.toFixed(5), +q.y.toFixed(5), +q.z.toFixed(5), +q.w.toFixed(5)];
-        this.onChanged?.();
-      };
-      ['x', 'y', 'z'].forEach((ax) =>
-        this.oriFolder.add(pr, ax, -180, 180, 0.5).name(`rot ${ax}°`).onChange(apply)
-      );
-      this.oriFolder.add({ cap: () => this._captureView(k) }, 'cap').name('Capture current view');
-    } else if (k.target != null) {
-      this.oriFolder
-        .add(k, 'target', ORI_TARGETS)
-        .name('target')
-        .onChange(() => {
-          this._rebuildOriViz();
-          this.onChanged?.();
-        });
-    } else {
-      if (!Array.isArray(k.point)) k.point = this._defaultAim();
-      const pr = { x: k.point[0], y: k.point[1], z: k.point[2] };
-      this.oriPointProxy = pr;
-      this.oriPointCtrls = ['x', 'y', 'z'].map((ax, ai) =>
-        this.oriFolder
-          .add(pr, ax, -20, 20, 0.01)
-          .name(`point ${ax}`)
+    if (this._hasLook(entry)) {
+      const lk = entry.look;
+      const pr = { x: lk[0], y: lk[1], z: lk[2] };
+      this.aimProxy = pr;
+      const f = this.kfFolder.addFolder('look（注視点・ワールド）');
+      this.aimCtrls = ['x', 'y', 'z'].map((ax, ai) =>
+        f.add(pr, ax, -20, 20, 0.01)
+          .name(ax)
           .onChange((v) => {
-            k.point[ai] = Number(v.toFixed(3));
-            this._rebuildOriViz();
+            entry.look[ai] = Number(v.toFixed(3));
+            if (this.aimSphere) this.aimSphere.position.set(entry.look[0], entry.look[1], entry.look[2]);
+            this._redrawAim();
             this.onChanged?.();
           })
       );
     }
-  }
-
-  /** 現在のエディタカメラの向きを free キーに取り込む */
-  _captureView(k) {
-    const q = this.ctx.world.camera.quaternion;
-    k.quat = [+q.x.toFixed(5), +q.y.toFixed(5), +q.z.toFixed(5), +q.w.toFixed(5)];
-    this._buildOriPanel();
-    this.onChanged?.();
-  }
-
-  /** t 変更で順序が変わりうるので整列し、選択を同じキーへ追従 */
-  _onOriTimeChanged(k) {
-    this._sortOriKeys();
-    this.state.oriKey = this._oriKeys().indexOf(k);
-    this.oriSelectCtrl?.updateDisplay();
-    this._rebuildOriViz();
-    this.onChanged?.();
-  }
-
-  /** 単一 lookAt ⇄ キーフレーム を切替 */
-  _enableOriKeyframes(enable) {
-    const phase = this._currentPhase();
-    const lc = phase.lookAt ?? {};
-    if (enable && !this._oriKeyed()) {
-      const key =
-        lc.mode === 'target' || lc.target
-          ? { t: 0, target: lc.target ?? ORI_TARGETS[0] }
-          : { t: 0, point: lc.point ? [...lc.point] : this._defaultAim() };
-      phase.lookAt = { lerp: lc.lerp ?? 1.0, keys: [key] };
-    } else if (!enable && this._oriKeyed()) {
-      const k0 = lc.keys[0];
-      phase.lookAt =
-        k0.target != null
-          ? { mode: 'target', target: k0.target, lerp: lc.lerp ?? 1.0 }
-          : { mode: 'fixed', point: k0.point ?? this._defaultAim() };
-    }
-    this.state.oriKey = 0;
-    this.sel = { kind: 'anchor', side: null };
-    this._buildOriPanel();
-    this._rebuildOriViz();
-    this._attachGizmo();
-    this.onChanged?.();
-  }
-
-  _addOriKey() {
-    if (!this._oriKeyed()) return;
-    const keys = this._oriKeys();
-    const i = this.state.oriKey;
-    const cur = keys[i];
-    const next = keys[i + 1];
-    const t = next ? (cur.t + next.t) / 2 : Math.min(cur.t + 0.25, 1);
-    const nk =
-      cur.quat != null
-        ? { t, quat: [...cur.quat] }
-        : cur.target != null
-          ? { t, target: cur.target }
-          : { t, point: cur.point ? [...cur.point] : this._defaultAim() };
-    nk.t = Number(t.toFixed(3));
-    keys.splice(i + 1, 0, nk);
-    this._sortOriKeys();
-    this.state.oriKey = keys.indexOf(nk);
-    this.sel = { kind: 'aim', oriIndex: this.state.oriKey };
-    this._buildOriPanel();
-    this._rebuildOriViz();
-    this._attachGizmo();
-    this.onChanged?.();
-  }
-
-  _removeOriKey() {
-    const keys = this._oriKeys();
-    if (keys.length <= 1) return;
-    keys.splice(this.state.oriKey, 1);
-    this.state.oriKey = Math.max(0, this.state.oriKey - 1);
-    this.sel = { kind: 'anchor', side: null };
-    this._buildOriPanel();
-    this._rebuildOriViz();
-    this._attachGizmo();
-    this.onChanged?.();
-  }
-
-  _selectOriKey(idx) {
-    this.state.oriKey = idx;
-    this.sel = { kind: 'aim', oriIndex: idx };
-    this._buildOriPanel();
-    this._rebuildOriViz();
-    this._attachGizmo();
-  }
-
-  _setOriType(type) {
-    const k = this._oriKeys()[this.state.oriKey];
-    if (!k) return;
-    if (type === 'target') {
-      delete k.point;
-      delete k.quat;
-      if (k.target == null) k.target = ORI_TARGETS[0];
-    } else if (type === 'point') {
-      delete k.target;
-      delete k.quat;
-      if (k.point == null) k.point = this._defaultAim();
-    } else if (type === 'free') {
-      delete k.point;
-      delete k.target;
-      if (k.quat == null) {
-        const q = this.ctx.world.camera.quaternion; // 現在のカメラ向きを初期値に
-        k.quat = [+q.x.toFixed(5), +q.y.toFixed(5), +q.z.toFixed(5), +q.w.toFixed(5)];
-      }
-    }
-    this.sel = { kind: 'anchor', side: null };
-    this._buildOriPanel();
-    this._rebuildOriViz();
-    this._attachGizmo();
-    this.onChanged?.();
-  }
-
-  _oriSphereFor(idx) {
-    return this.oriSpheres.find((s) => s.userData.oriIndex === idx);
-  }
-
-  /** aim(point) キーの球＋連結線を再構築（注視点はワールド座標。target キーは編集対象外で非表示） */
-  _rebuildOriViz() {
-    for (const s of this.oriSpheres) {
-      this.viz.remove(s);
-      s.geometry.dispose();
-      s.material.dispose();
-    }
-    this.oriSpheres = [];
-    if (this.oriLine) {
-      this.viz.remove(this.oriLine);
-      this.oriLine.geometry.dispose();
-      this.oriLine.material.dispose();
-      this.oriLine = null;
-    }
-    if (!this.active || !this._oriKeyed()) return;
-
-    const pts = [];
-    this._oriKeys().forEach((k, i) => {
-      if (!Array.isArray(k.point)) return;
-      const sphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.05, 12, 10),
-        new THREE.MeshBasicMaterial({ color: ORI_COLOR, depthTest: false, transparent: true })
-      );
-      sphere.renderOrder = 1000;
-      sphere.position.set(k.point[0], k.point[1], k.point[2]);
-      sphere.userData = { kind: 'aim', oriIndex: i };
-      this.viz.add(sphere);
-      this.oriSpheres.push(sphere);
-      pts.push(sphere.position.clone());
-    });
-
-    if (pts.length >= 2) {
-      this.oriLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({ color: ORI_COLOR, depthTest: false, transparent: true, opacity: 0.5 })
-      );
-      this.oriLine.renderOrder = 996;
-      this.viz.add(this.oriLine);
-    }
-    this._colorOri();
-  }
-
-  _colorOri() {
-    for (const s of this.oriSpheres) {
-      s.material.color.setHex(s.userData.oriIndex === this.state.oriKey ? ORI_SEL_COLOR : ORI_COLOR);
-    }
-  }
-
-  _isManual(entry) {
-    return !!(kfHandle(entry, 'hIn') || kfHandle(entry, 'hOut'));
-  }
-
-  _syncManualToggle() {
-    const entry = this._currentPhase()?.path[this.state.keyframe];
-    const isKf = entry && entry !== '@current';
-    this.state.manual = isKf ? this._isManual(entry) : false;
-    this.manualCtrl?.updateDisplay();
-    this.manualCtrl?.enable(!!isKf);
   }
 
   // ---- 可視化 ----
@@ -543,7 +289,7 @@ export class PathEditor {
 
     this._rebuildLine();
     this._rebuildHandles();
-    this._rebuildOriViz();
+    this._rebuildAim();
     this._attachGizmo();
   }
 
@@ -556,12 +302,7 @@ export class PathEditor {
     }
     const phase = this._currentPhase();
     if (phase.path.length < 2) return;
-    const curve = buildCurve(
-      phase.path,
-      this._offset(),
-      phase.closed === true,
-      this.ctx.world.camera.position
-    );
+    const curve = buildCurve(phase.path, this._offset(), phase.closed === true, this.ctx.world.camera.position);
     const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(160));
     const mat = new THREE.LineBasicMaterial({ color: 0x3070ff, depthTest: false, transparent: true });
     this.line = new THREE.Line(geo, mat);
@@ -569,7 +310,7 @@ export class PathEditor {
     this.viz.add(this.line);
   }
 
-  /** 選択中キーフレームが manual のとき in/out ハンドル球＋接続線を描く */
+  /** 選択中KFが manual のとき in/out ハンドル球＋接続線を描く */
   _rebuildHandles() {
     for (const h of this.handles) {
       this.viz.remove(h);
@@ -585,8 +326,7 @@ export class PathEditor {
     }
 
     const phase = this._currentPhase();
-    const i = this.state.keyframe;
-    const entry = phase.path[i];
+    const entry = phase.path[this.state.keyframe];
     if (!entry || entry === '@current' || !this._isManual(entry)) return;
 
     const offset = this._offset();
@@ -594,8 +334,7 @@ export class PathEditor {
     const linePts = [];
 
     for (const side of ['in', 'out']) {
-      const key = side === 'in' ? 'hIn' : 'hOut';
-      const h = kfHandle(entry, key);
+      const h = kfHandle(entry, side === 'in' ? 'hIn' : 'hOut');
       if (!h) continue;
       const handleW = anchorW.clone().add(h);
       const sphere = new THREE.Mesh(
@@ -604,7 +343,7 @@ export class PathEditor {
       );
       sphere.renderOrder = 1000;
       sphere.position.copy(handleW);
-      sphere.userData = { kind: 'handle', kfIndex: i, side };
+      sphere.userData = { kind: 'handle', kfIndex: this.state.keyframe, side };
       this.viz.add(sphere);
       this.handles.push(sphere);
       linePts.push(anchorW.clone(), handleW.clone());
@@ -620,13 +359,9 @@ export class PathEditor {
     }
   }
 
-  /**
-   * ドラッグ中の軽量更新: 既存ハンドル球を data から再配置し接続線だけ作り直す。
-   * 球を dispose しないので tc がアタッチ中の球を壊さない。
-   */
+  /** ドラッグ中の軽量更新: ハンドル球を data から再配置し接続線だけ作り直す（tc 球を dispose しない） */
   _redrawHandles() {
-    const phase = this._currentPhase();
-    const entry = phase.path[this.state.keyframe];
+    const entry = this._currentPhase().path[this.state.keyframe];
     if (!entry || entry === '@current' || !this._isManual(entry)) return;
     const anchorW = kfPos(entry).add(this._offset());
     const linePts = [];
@@ -642,6 +377,55 @@ export class PathEditor {
     }
   }
 
+  /** 選択中KFの注視点ポインタ球＋接続線を再構築（look override がある場合のみ） */
+  _rebuildAim() {
+    if (this.aimSphere) {
+      this.viz.remove(this.aimSphere);
+      this.aimSphere.geometry.dispose();
+      this.aimSphere.material.dispose();
+      this.aimSphere = null;
+    }
+    if (this.aimLine) {
+      this.viz.remove(this.aimLine);
+      this.aimLine.geometry.dispose();
+      this.aimLine.material.dispose();
+      this.aimLine = null;
+    }
+    if (!this.active) return;
+    const entry = this._currentPhase()?.path[this.state.keyframe];
+    if (!entry || !this._hasLook(entry)) return;
+
+    const lk = entry.look;
+    this.aimSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 12, 10),
+      new THREE.MeshBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true })
+    );
+    this.aimSphere.renderOrder = 1000;
+    this.aimSphere.position.set(lk[0], lk[1], lk[2]);
+    this.aimSphere.userData = { kind: 'aim', kfIndex: this.state.keyframe };
+    this.viz.add(this.aimSphere);
+
+    const anchorW = kfPos(entry).add(this._offset());
+    this.aimLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([anchorW, this.aimSphere.position.clone()]),
+      new THREE.LineBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true, opacity: 0.6 })
+    );
+    this.aimLine.renderOrder = 997;
+    this.viz.add(this.aimLine);
+  }
+
+  /** KF位置→注視点 の線だけ更新（球は dispose しない） */
+  _redrawAim() {
+    const entry = this._currentPhase()?.path[this.state.keyframe];
+    if (!this.aimLine || !entry || !this._hasLook(entry)) return;
+    const anchorW = kfPos(entry).add(this._offset());
+    this.aimLine.geometry.dispose();
+    this.aimLine.geometry = new THREE.BufferGeometry().setFromPoints([
+      anchorW,
+      this.aimSphere ? this.aimSphere.position.clone() : anchorW,
+    ]);
+  }
+
   _sphereFor(index) {
     return this.spheres.find((s) => s.userData.kfIndex === index);
   }
@@ -651,17 +435,16 @@ export class PathEditor {
   }
 
   _syncSphere(index) {
-    const phase = this._currentPhase();
     const sphere = this._sphereFor(index);
     if (!sphere) return;
-    sphere.position.copy(kfPos(phase.path[index])).add(this._offset());
+    sphere.position.copy(kfPos(this._currentPhase().path[index])).add(this._offset());
   }
 
   /** 現在の選択（アンカー/ハンドル/aim）に応じてギズモを付け替え、色を更新 */
   _attachGizmo() {
     let obj = null;
     if (this.sel.kind === 'handle') obj = this._handleFor(this.sel.side);
-    else if (this.sel.kind === 'aim') obj = this._oriSphereFor(this.sel.oriIndex);
+    else if (this.sel.kind === 'aim') obj = this.aimSphere;
     if (!obj) {
       this.sel = { kind: 'anchor', side: null };
       obj = this._sphereFor(this.state.keyframe);
@@ -678,14 +461,13 @@ export class PathEditor {
         s.userData.kfIndex === this.state.keyframe ? SELECTED_COLOR : NORMAL_COLOR
       );
     }
-    this._colorOri();
   }
 
   /** ビューポートクリックでアンカー/ハンドル/aim 球を選択（ギズモ操作とは排他） */
   _pick(e) {
     if (!this.active || e.button !== 0) return;
     if (this.tc.axis) return;
-    const targets = [...this.handles, ...this.oriSpheres, ...this.spheres]; // ハンドル/aim 優先
+    const targets = [...this.handles, ...(this.aimSphere ? [this.aimSphere] : []), ...this.spheres];
     if (!targets.length) return;
     const rect = this.ctx.world.renderer.domElement.getBoundingClientRect();
     _ndc.set(
@@ -700,7 +482,8 @@ export class PathEditor {
       this.sel = { kind: 'handle', side: ud.side };
       this._attachGizmo();
     } else if (ud.kind === 'aim') {
-      this._selectOriKey(ud.oriIndex);
+      this.sel = { kind: 'aim' };
+      this._attachGizmo();
     } else {
       this.kfSelectCtrl.setValue(ud.kfIndex); // onChange → _selectAnchor
     }
@@ -710,9 +493,10 @@ export class PathEditor {
   _selectAnchor() {
     this.sel = { kind: 'anchor', side: null };
     this._rebuildHandles();
+    this._rebuildAim();
     this._attachGizmo();
     this._buildKfPanel();
-    this._syncManualToggle();
+    this._syncToggles();
   }
 
   /** 外部（タイムラインの◆クリック等）からの選択 */
@@ -730,40 +514,70 @@ export class PathEditor {
     const i = this.state.keyframe;
     const entry = phase.path[i];
     if (!entry || entry === '@current') {
-      this._syncManualToggle();
+      this._syncToggles();
       return;
     }
     const wantManual = this.state.manual;
-    const isManual = this._isManual(entry);
-    if (wantManual === isManual) return;
+    if (wantManual === this._isManual(entry)) return;
 
     if (wantManual) {
-      // auto → manual: 自動接線からハンドルを初期化（見た目が飛ばない）
       const t = this._autoTangent(i);
-      const pos = kfPos(entry);
-      phase.path[i] = {
-        p: [pos.x, pos.y, pos.z].map((v) => Number(v.toFixed(3))),
-        hIn: [-t.x / 3, -t.y / 3, -t.z / 3].map((v) => Number(v.toFixed(3))),
-        hOut: [t.x / 3, t.y / 3, t.z / 3].map((v) => Number(v.toFixed(3))),
-      };
+      const obj = Array.isArray(entry) ? this._toObject(entry) : entry;
+      obj.hIn = [-t.x / 3, -t.y / 3, -t.z / 3].map((v) => Number(v.toFixed(3)));
+      obj.hOut = [t.x / 3, t.y / 3, t.z / 3].map((v) => Number(v.toFixed(3)));
+      phase.path[i] = obj;
     } else {
-      // manual → auto: 配列へ戻す
-      const pos = kfPos(entry);
-      phase.path[i] = [pos.x, pos.y, pos.z].map((v) => Number(v.toFixed(3)));
+      const obj = entry;
+      delete obj.hIn;
+      delete obj.hOut;
+      if (!this._hasLook(obj)) phase.path[i] = [obj.p[0], obj.p[1], obj.p[2]];
     }
     this.sel = { kind: 'anchor', side: null };
     this._rebuildHandles();
     this._rebuildLine();
     this._attachGizmo();
     this._buildKfPanel();
-    this._syncManualToggle();
+    this._syncToggles();
     this.onChanged?.();
+  }
+
+  /** 選択キーフレームの look override を切替 */
+  _toggleLookOverride() {
+    const phase = this._currentPhase();
+    const i = this.state.keyframe;
+    const entry = phase.path[i];
+    if (!entry || entry === '@current') {
+      this._syncToggles();
+      return;
+    }
+    const want = this.state.lookOverride;
+    if (want === this._hasLook(entry)) return;
+
+    if (want) {
+      const obj = Array.isArray(entry) ? this._toObject(entry) : entry;
+      obj.look = this._defaultAimPoint();
+      phase.path[i] = obj;
+    } else {
+      const obj = entry;
+      delete obj.look;
+      if (!this._isManual(obj)) phase.path[i] = [obj.p[0], obj.p[1], obj.p[2]];
+    }
+    this.sel = { kind: 'anchor', side: null };
+    this._rebuildAim();
+    this._attachGizmo();
+    this._buildKfPanel();
+    this._syncToggles();
+    this.onChanged?.();
+  }
+
+  /** 配列キーフレームを { p:[...] } オブジェクト形へ */
+  _toObject(arr) {
+    return { p: [arr[0], arr[1], arr[2]] };
   }
 
   /** uniform Catmull-Rom 自動接線 t_i = (P[i+1]-P[i-1])/2（local 座標、camera-eval と同式） */
   _autoTangent(i) {
     const path = this._currentPhase().path;
-    const n = path.length;
     const prev = this._localPos(path[i - 1] ?? path[i]);
     const next = this._localPos(path[i + 1] ?? path[i]);
     return next.sub(prev).multiplyScalar(0.5);
@@ -777,24 +591,19 @@ export class PathEditor {
     const offset = this._offset();
 
     if (ud.kind === 'aim') {
-      // 注視点キーフレーム（ワールド座標。offset 非適用）
-      const key = this._oriKeys()[ud.oriIndex];
-      if (!key) return;
-      key.point = [
+      // 注視点（ワールド座標。offset 非適用）
+      const entry = phase.path[ud.kfIndex];
+      if (!entry || !this._hasLook(entry)) return;
+      entry.look = [
         Number(obj.position.x.toFixed(3)),
         Number(obj.position.y.toFixed(3)),
         Number(obj.position.z.toFixed(3)),
       ];
-      if (this.state.oriKey === ud.oriIndex && this.oriPointProxy && this.oriPointCtrls) {
-        [this.oriPointProxy.x, this.oriPointProxy.y, this.oriPointProxy.z] = key.point;
-        this.oriPointCtrls.forEach((c) => c.updateDisplay());
+      if (this.state.keyframe === ud.kfIndex && this.aimProxy && this.aimCtrls) {
+        [this.aimProxy.x, this.aimProxy.y, this.aimProxy.z] = entry.look;
+        this.aimCtrls.forEach((c) => c.updateDisplay());
       }
-      // 連結線だけ更新（球は tc が動かしているので作り直さない）
-      if (this.oriLine) {
-        const pts = this.oriSpheres.map((s) => s.position.clone());
-        this.oriLine.geometry.dispose();
-        this.oriLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
-      }
+      this._redrawAim();
       this.onChanged?.();
       return;
     }
@@ -809,14 +618,13 @@ export class PathEditor {
         Number(delta.y.toFixed(3)),
         Number(delta.z.toFixed(3)),
       ];
-      // パネルのハンドル数値を同期（選択中KFのみ）
       const side = ud.side;
       if (this.kfPanel?.index === ud.kfIndex && this.kfPanel[side]) {
         const pr = this.kfPanel[side].proxy;
         [pr.x, pr.y, pr.z] = entry[key];
         this.kfPanel[side].ctrls.forEach((c) => c.updateDisplay());
       }
-      this._redrawHandles(); // 接続線のみ更新（球は tc が動かしているので作り直さない）
+      this._redrawHandles();
       this._rebuildLine();
       this.onChanged?.();
       return;
@@ -830,14 +638,14 @@ export class PathEditor {
     if (Array.isArray(entry)) phase.path[i] = p;
     else entry.p = p;
 
-    // パネルの pos 数値を同期（選択中KFのみ）
     if (this.kfPanel?.index === i) {
       this.kfPanel.posProxy.x = p[0];
       this.kfPanel.posProxy.y = p[1];
       this.kfPanel.posProxy.z = p[2];
       this.kfPanel.posCtrls.forEach((c) => c.updateDisplay());
     }
-    this._redrawHandles(); // ハンドル球はアンカー相対なので追従（dispose せず再配置）
+    this._redrawHandles();
+    this._redrawAim();
     this._rebuildLine();
     this.onChanged?.();
   }
@@ -911,13 +719,13 @@ export class PathEditor {
       this.handleLines.geometry.dispose();
       this.handleLines.material.dispose();
     }
-    for (const s of this.oriSpheres) {
-      s.geometry.dispose();
-      s.material.dispose();
+    if (this.aimSphere) {
+      this.aimSphere.geometry.dispose();
+      this.aimSphere.material.dispose();
     }
-    if (this.oriLine) {
-      this.oriLine.geometry.dispose();
-      this.oriLine.material.dispose();
+    if (this.aimLine) {
+      this.aimLine.geometry.dispose();
+      this.aimLine.material.dispose();
     }
     if (this.line) {
       this.line.geometry.dispose();

@@ -423,6 +423,8 @@ export class Timeline {
     // lil-gui のテキスト入力等は素通し
     const tag = e.target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    // Cmd/Ctrl ショートカット（undo/redo 等）はエディタ側へ通す
+    if (e.metaKey || e.ctrlKey) return;
 
     const step = e.shiftKey ? 10 : 1;
     let consumed = true;

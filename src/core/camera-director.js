@@ -4,6 +4,9 @@ import {
   buildCurve,
   samplePath,
   applyLook,
+  isKeyedOrientation,
+  sampleAimPoint,
+  smoothToPoint,
   FollowEvaluator,
   LoopEvaluator,
 } from './camera-eval.js';
@@ -92,6 +95,19 @@ export class CameraDirector {
     if (target) this.camera.lookAt(this.lookCurrent);
   }
 
+  /** 向き評価。keys があれば u（線形フェーズ進行）で aim キーフレーム内挿、無ければ従来の単一 lookAt */
+  _applyOrientation(lookCfg, u, dt) {
+    if (isKeyedOrientation(lookCfg)) {
+      const pt = sampleAimPoint(lookCfg.keys, u, this._resolve, _look);
+      if (pt) {
+        smoothToPoint(this.lookCurrent, pt, lookCfg.lerp, dt, this._lookOpts());
+        this.camera.lookAt(this.lookCurrent);
+      }
+    } else {
+      this._applyLook(lookCfg, dt);
+    }
+  }
+
   /** 一方向パスを再生して完了で resolve */
   playPhase(phase) {
     const offset = this._resolveOffset(phase);
@@ -99,6 +115,7 @@ export class CameraDirector {
     const state = { t: 0 };
     const fovFrom = phase.fov ? phase.fov[0] : null;
     const fovTo = phase.fov ? phase.fov[1] : null;
+    let elapsed = 0; // 線形フェーズ進行（向きキー用。位置イージングとは独立）
 
     return new Promise((resolve) => {
       const tick = (dt) => {
@@ -109,7 +126,8 @@ export class CameraDirector {
           this.camera.fov = fov;
           this.camera.updateProjectionMatrix();
         }
-        this._applyLook(phase.lookAt, dt);
+        elapsed += dt;
+        this._applyOrientation(phase.lookAt, Math.min(elapsed / phase.duration, 1), dt);
       };
       this.world.addTickable(tick);
       this._activeTicks.add(tick);

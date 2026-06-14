@@ -4,6 +4,9 @@ import {
   buildCurve,
   samplePath,
   applyLook,
+  isKeyedOrientation,
+  sampleAimPoint,
+  smoothToPoint,
   FollowEvaluator,
   LoopEvaluator,
 } from '../core/camera-eval.js';
@@ -30,6 +33,7 @@ const DT = 1 / FPS;
 const MAX_PHASE_FRAMES = 120 * FPS; // 暴走保険
 
 const _head = new THREE.Vector3();
+const _aim = new THREE.Vector3();
 
 /**
  * @param {object} gcfg choreo.data.generate
@@ -49,14 +53,18 @@ export function bakeGenerateCamera(gcfg, env) {
 
   // --- generate.enter 鏡像: phase0 開始位置へ即時セット ---
   const ph0 = gcfg.phases[0];
+  const ph0Look =
+    ph0.lookAt?.point ?? ph0.lookAt?.keys?.find((k) => Array.isArray(k.point))?.point ?? [0, 0.5, 0];
   const state = {
     pos: new THREE.Vector3(),
-    lookCurrent: new THREE.Vector3(...(ph0.lookAt?.point ?? [0, 0.5, 0])),
+    lookCurrent: new THREE.Vector3(...ph0Look),
     fov: ph0.fov ? ph0.fov[0] : 45,
     time: 0,
     swapTime: null, // photoRecede 終了 = パーティクル開始時刻
   };
-  if (Array.isArray(ph0.path?.[0])) state.pos.set(...ph0.path[0]);
+  const ph0Start = ph0.path?.[0];
+  if (Array.isArray(ph0Start)) state.pos.set(...ph0Start);
+  else if (ph0Start && ph0Start !== '@current') state.pos.set(...ph0Start.p);
 
   const posArr = [];
   const lookArr = [];
@@ -72,8 +80,16 @@ export function bakeGenerateCamera(gcfg, env) {
     return null;
   };
 
-  // 注視点平滑化（camera-eval.applyLook へ委譲。lookInitialized は enter で済んでいる前提）
-  const applyLookSim = (lookCfg, dt) => applyLook(lookCfg, dt, state.lookCurrent, resolveTarget);
+  // 向き評価（keys があれば aim キーフレーム内挿、無ければ従来の単一 lookAt）。
+  // u は線形フェーズ進行（位置イージングとは独立）。lookInitialized は enter 済み前提。
+  const applyOrientationSim = (lookCfg, u, dt) => {
+    if (isKeyedOrientation(lookCfg)) {
+      const pt = sampleAimPoint(lookCfg.keys, u, resolveTarget, _aim);
+      if (pt) smoothToPoint(state.lookCurrent, pt, lookCfg.lerp, dt);
+    } else {
+      applyLook(lookCfg, dt, state.lookCurrent, resolveTarget);
+    }
+  };
 
   const record = () => {
     posArr.push(state.pos.x, state.pos.y, state.pos.z);
@@ -144,9 +160,10 @@ export function bakeGenerateCamera(gcfg, env) {
 
     for (let f = 1; f <= frames; f++) {
       const t = easeFn(Math.min((f * DT) / phase.duration, 1));
+      const uLin = Math.min((f * DT) / phase.duration, 1); // 線形進行（向きキー用）
       const fov = samplePath(curve, t, fovFrom, fovTo, state.pos);
       if (fov !== null) state.fov = fov;
-      applyLookSim(phase.lookAt, DT);
+      applyOrientationSim(phase.lookAt, uLin, DT);
       state.time += DT;
       record();
       for (const m of pending) {

@@ -16,6 +16,8 @@ import * as THREE from 'three';
 const _t = new THREE.Vector3();
 const _rel = new THREE.Vector3();
 const _look2 = new THREE.Vector3();
+const _pa = new THREE.Vector3();
+const _pb = new THREE.Vector3();
 
 /** 角度を (-π, π] に正規化 */
 export function wrapPi(a) {
@@ -138,6 +140,61 @@ export function applyLook(lookCfg, dt, lookCurrent, resolveTarget, opts) {
     lookCurrent.lerp(target, k);
   }
   return target;
+}
+
+// ---- 向きキーフレーム（Phase3a: aim 注視点の時間補間） ----
+// lookAt が keys を持てば「u（線形フェーズ進行 0..1）」で注視点を内挿する。
+// keys が無ければ従来の単一 lookAt（applyLook）として扱い、既存JSONはビット一致のまま。
+// keys は t 昇順で与えられている前提（エディタが整列を保証する）。
+
+/** lookAt がキーフレーム配列を持つか */
+export function isKeyedOrientation(lookCfg) {
+  return !!(lookCfg && Array.isArray(lookCfg.keys) && lookCfg.keys.length);
+}
+
+/** キー（{point}|{target}）の注視点を解決。null なら解決不能 */
+function resolveKeyPoint(key, resolveTarget, out) {
+  if (Array.isArray(key.point)) return out.set(key.point[0], key.point[1], key.point[2]);
+  if (key.target) return resolveTarget(key.target, out);
+  return null;
+}
+
+/** u における前後キーと内挿係数 f */
+function segAt(keys, u) {
+  const n = keys.length;
+  if (n === 1 || u <= keys[0].t) return { a: keys[0], b: keys[0], f: 0 };
+  const last = keys[n - 1];
+  if (u >= last.t) return { a: last, b: last, f: 0 };
+  for (let i = 0; i < n - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (u >= a.t && u <= b.t) {
+      const span = b.t - a.t;
+      return { a, b, f: span > 1e-6 ? (u - a.t) / span : 0 };
+    }
+  }
+  return { a: last, b: last, f: 0 };
+}
+
+/** aim キーフレーム列から u 時点の注視点を内挿（point/target を lerp）。null なら解決不能 */
+export function sampleAimPoint(keys, u, resolveTarget, out) {
+  const { a, b, f } = segAt(keys, u);
+  const pa = resolveKeyPoint(a, resolveTarget, _pa);
+  if (!pa) return null;
+  if (a === b || f <= 0) return out.copy(pa);
+  const pb = resolveKeyPoint(b, resolveTarget, _pb) ?? pa;
+  return out.copy(pa).lerp(pb, f);
+}
+
+/** lookCurrent を point へ指数平滑（applyLook と同式。aim キーフレーム評価用） */
+export function smoothToPoint(lookCurrent, point, lerp, dt, opts) {
+  if (opts && opts.initialized === false) {
+    lookCurrent.copy(point);
+    opts.onInit?.(point);
+  }
+  const l = lerp ?? 1.0;
+  if (l >= 1.0) lookCurrent.copy(point);
+  else lookCurrent.lerp(point, 1 - Math.pow(1 - l, dt * 60));
 }
 
 /**

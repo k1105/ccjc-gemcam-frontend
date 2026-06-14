@@ -27,10 +27,14 @@ export class GenerateSequence extends Sequence {
 
     // --- カメラを phase0 開始位置へ即時セット（DOM白フラッシュが画面を覆っている間） ---
     const ph0 = gcfg.phases[0];
-    world.camera.position.set(...ph0.path[0]);
+    const startKf = ph0.path[0];
+    world.camera.position.set(...(Array.isArray(startKf) ? startKf : startKf.p));
     world.camera.fov = ph0.fov ? ph0.fov[0] : world.camera.fov;
     world.camera.updateProjectionMatrix();
-    const lookPoint = new THREE.Vector3(...ph0.lookAt.point);
+    // 初期注視点: 単一 lookAt.point か、向きキーフレームの最初の point を採用（無ければ既定）
+    const lookArr =
+      ph0.lookAt?.point ?? ph0.lookAt?.keys?.find((k) => Array.isArray(k.point))?.point ?? [0, 0.5, 0];
+    const lookPoint = new THREE.Vector3(...lookArr);
     director.syncLookFromCamera(lookPoint);
     world.camera.lookAt(lookPoint);
 

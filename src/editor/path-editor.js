@@ -129,6 +129,12 @@ export class PathEditor {
     return shot.times;
   }
 
+  /** lil-gui の数値コントローラ: スライダーは有限レンジのまま、数値入力はクランプせず任意値に */
+  _freeRange(ctrl) {
+    ctrl._clamp = (v) => v; // lil-gui 0.21: 上下限クランプを無効化（slider/drag の写像は min/max のまま）
+    return ctrl;
+  }
+
   /** ショットの relativeTo を解決したワールドオフセット */
   _shotOffset(shot) {
     if (shot?.relativeTo !== 'bottle') return new THREE.Vector3();
@@ -338,8 +344,7 @@ export class PathEditor {
       const pr = { x: lk[0], y: lk[1], z: lk[2] };
       this.aimProxy = pr;
       this.aimCtrls = ['x', 'y', 'z'].map((ax, ai) =>
-        lookF
-          .add(pr, ax, -20, 20, 0.01)
+        this._freeRange(lookF.add(pr, ax, -180, 180, 0.01))
           .name(ax)
           .onChange((v) => {
             entry.look[ai] = Number(v.toFixed(3));
@@ -559,8 +564,7 @@ export class PathEditor {
       const lp = shot.lookAt.point;
       lookProxy = { x: lp[0], y: lp[1], z: lp[2] };
       lookCtrls = ['x', 'y', 'z'].map((ax, ai) =>
-        lookF
-          .add(lookProxy, ax, -20, 20, 0.01)
+        this._freeRange(lookF.add(lookProxy, ax, -180, 180, 0.01))
           .name(ax)
           .onChange((v) => {
             shot.lookAt.point[ai] = Number(v.toFixed(3));
@@ -597,8 +601,7 @@ export class PathEditor {
           .onChange(() => this.onChanged?.());
         aimKeyProxy = { x: k.point[0], y: k.point[1], z: k.point[2] };
         aimKeyCtrls = ['x', 'y', 'z'].map((ax, ai) =>
-          lookF
-            .add(aimKeyProxy, ax, -20, 20, 0.01)
+          this._freeRange(lookF.add(aimKeyProxy, ax, -180, 180, 0.01))
             .name(`look ${ax}`)
             .onChange((v) => {
               k.point[ai] = Number(v.toFixed(3));

@@ -61,8 +61,8 @@ export function bakeGenerateCamera(gcfg, env) {
     new THREE.Vector3(0, 0.4 * bottleScale, 0)
   );
 
-  // --- generate.enter 鏡像: shot0 開始位置へ即時セット ---
-  const ph0 = gcfg.shots[0];
+  // --- generate.enter 鏡像: 最初の base ショット（static オーバーレイは除く）の開始位置へ ---
+  const ph0 = gcfg.shots.find((s) => s.type !== 'static') ?? gcfg.shots[0];
   const ph0Look =
     ph0.lookAt?.point ?? ph0.lookAt?.keys?.find((k) => Array.isArray(k.point))?.point ?? [0, 0.5, 0];
   const state = {
@@ -125,16 +125,51 @@ export function bakeGenerateCamera(gcfg, env) {
     return null;
   };
 
-  // freeQuat があればそれを向きとして記録、無ければ pos→lookCurrent の lookAt から導出。
-  // いずれにせよ state.quat に現在の向きを残す（次フェーズの free 平滑化の起点になる）。
+  // freeQuat があればそれを向き、無ければ pos→lookCurrent の lookAt から導出（_recQuat に格納）
+  const recQuat = (freeQuat) => {
+    if (freeQuat) _recQuat.copy(freeQuat);
+    else _recQuat.setFromRotationMatrix(_lookM.lookAt(state.pos, state.lookCurrent, UP));
+    return _recQuat;
+  };
+
+  // 末尾に1フレーム追記（base パスの逐次記録）。state.quat に現在の向きを残す。
   const record = (freeQuat) => {
     posArr.push(state.pos.x, state.pos.y, state.pos.z);
     lookArr.push(state.lookCurrent.x, state.lookCurrent.y, state.lookCurrent.z);
     fovArr.push(state.fov);
-    if (freeQuat) _recQuat.copy(freeQuat);
-    else _recQuat.setFromRotationMatrix(_lookM.lookAt(state.pos, state.lookCurrent, UP));
-    quatArr.push(_recQuat.x, _recQuat.y, _recQuat.z, _recQuat.w);
-    state.quat.copy(_recQuat);
+    const q = recQuat(freeQuat);
+    quatArr.push(q.x, q.y, q.z, q.w);
+    state.quat.copy(q);
+  };
+
+  // 任意フレーム f を state から上書き（static オーバーレイ用）。
+  const writeFrame = (f, freeQuat) => {
+    const q = recQuat(freeQuat);
+    posArr[f * 3] = state.pos.x;
+    posArr[f * 3 + 1] = state.pos.y;
+    posArr[f * 3 + 2] = state.pos.z;
+    lookArr[f * 3] = state.lookCurrent.x;
+    lookArr[f * 3 + 1] = state.lookCurrent.y;
+    lookArr[f * 3 + 2] = state.lookCurrent.z;
+    fovArr[f] = state.fov;
+    quatArr[f * 4] = q.x;
+    quatArr[f * 4 + 1] = q.y;
+    quatArr[f * 4 + 2] = q.z;
+    quatArr[f * 4 + 3] = q.w;
+  };
+
+  // フレーム数を n まで拡張（不足分は直前フレームの値で埋める＝ホールド）。
+  const ensureFrames = (n) => {
+    let cur = fovArr.length;
+    while (cur < n) {
+      const s = (cur - 1) * 3;
+      const sq = (cur - 1) * 4;
+      posArr.push(posArr[s], posArr[s + 1], posArr[s + 2]);
+      lookArr.push(lookArr[s], lookArr[s + 1], lookArr[s + 2]);
+      fovArr.push(fovArr[cur - 1]);
+      quatArr.push(quatArr[sq], quatArr[sq + 1], quatArr[sq + 2], quatArr[sq + 3]);
+      cur++;
+    }
   };
 
   // パス構築（camera-eval.buildCurve へ委譲。relativeTo/'@current' を解決）
@@ -148,19 +183,18 @@ export function bakeGenerateCamera(gcfg, env) {
 
   record(); // frame 0 = 初期状態
 
+  // --- base パス: 逐次再生されるショット（path/follow/loop）を時系列に連結 ---
+  // static は「上に被せるオーバーレイ」なので base には含めず、後段で絶対時刻に焼き込む。
   for (const phase of gcfg.shots) {
+    if (phase.type === 'static') continue;
     const startFrame = posArr.length / 3 - 1; // このショットの開始＝直前フレーム
-    const info = { id: phase.id, type: phase.type, startFrame, frameCount: 0, holdSec: 0, markers: [] };
+    const info = { id: phase.id, type: phase.type, startFrame, frameCount: 0, holdSec: 0, markers: [], layer: 'base' };
 
-    // cut:true（path/static のハードカット）は向きを開始時 snap させる
-    if (phase.cut && (phase.type === 'path' || phase.type === 'static')) {
-      lookInit.initialized = false;
-    }
+    // cut:true（path のハードカット）は向きを開始時 snap させる
+    if (phase.cut && phase.type === 'path') lookInit.initialized = false;
 
     if (phase.type === 'path') {
       stepPath(phase, info);
-    } else if (phase.type === 'static') {
-      stepStatic(phase, info);
     } else if (phase.type === 'follow') {
       stepFollow(phase, info);
     } else if (phase.type === 'loop') {
@@ -174,6 +208,12 @@ export function bakeGenerateCamera(gcfg, env) {
     if (phase.type === 'path' && phase.id === 'photoRecede' && state.swapTime === null) {
       state.swapTime = state.time;
     }
+  }
+
+  // --- overlay パス: static ショットを start（絶対秒）からの区間に焼き込む（base を上書き） ---
+  for (const phase of gcfg.shots) {
+    if (phase.type !== 'static') continue;
+    phaseInfos.push(bakeStaticOverlay(phase));
   }
 
   return {
@@ -231,31 +271,53 @@ export function bakeGenerateCamera(gcfg, env) {
   }
 
   /**
-   * type:"static"。duration 秒、固定位置にカメラを据える（定点）。
-   * lookAt の target 追従はしてよい。fov は配列でランプ／数値で固定。
+   * type:"static"（定点オーバーレイ）。start（絶対秒）から duration 秒、固定位置の
+   * カメラで base タイムラインを上書きする（マルチカムのカット）。lookAt の target
+   * 追従はしてよい。fov は配列でランプ／数値で固定。開始時は向きを snap（ハードカット）。
    */
-  function stepStatic(phase, info) {
-    // 位置: "@current" は直前フレーム位置を維持、配列は relativeTo オフセット加算
-    if (phase.pos !== '@current') {
+  function bakeStaticOverlay(phase) {
+    const dur = phase.duration ?? 1;
+    const startFrame = Math.max(0, Math.round((phase.start ?? 0) * FPS));
+    const frames = Math.max(1, Math.round(dur * FPS));
+    ensureFrames(startFrame + frames); // 不足分は直前フレームでホールドして拡張
+
+    // 位置: "@current" は overlay 開始時の base カメラ位置、配列は relativeTo 加算
+    if (phase.pos === '@current') {
+      state.pos.set(
+        posArr[startFrame * 3] ?? 0,
+        posArr[startFrame * 3 + 1] ?? 0,
+        posArr[startFrame * 3 + 2] ?? 0
+      );
+    } else {
       state.pos.set(phase.pos[0], phase.pos[1], phase.pos[2]);
       if (phase.relativeTo === 'bottle') state.pos.add(bottleCenter);
     }
-    const easeFn = gsap.parseEase(phase.ease || 'none');
-    const dur = phase.duration ?? 1;
-    const frames = Math.max(1, Math.round(dur * FPS));
-    const fovArr = Array.isArray(phase.fov);
-    const fovFrom = phase.fov != null ? (fovArr ? phase.fov[0] : phase.fov) : null;
-    const fovTo = phase.fov != null ? (fovArr ? phase.fov[1] ?? phase.fov[0] : phase.fov) : null;
 
-    for (let f = 1; f <= frames; f++) {
-      const t = easeFn(Math.min((f * DT) / dur, 1));
+    const easeFn = gsap.parseEase(phase.ease || 'none');
+    const fovIsArr = Array.isArray(phase.fov);
+    const fovFrom = phase.fov != null ? (fovIsArr ? phase.fov[0] : phase.fov) : null;
+    const fovTo = phase.fov != null ? (fovIsArr ? phase.fov[1] ?? phase.fov[0] : phase.fov) : null;
+    if (fovFrom !== null) state.fov = fovFrom;
+
+    lookInit.initialized = false; // オーバーレイは開始時に向きを snap（カット）
+
+    for (let k = 1; k <= frames; k++) {
+      const f = startFrame + k - 1;
+      const t = easeFn(Math.min((k * DT) / dur, 1));
       if (fovFrom !== null) state.fov = fovFrom + (fovTo - fovFrom) * t;
+      state.time = f / FPS; // hero 等の被写体解決を絶対時刻に合わせる
       const freeQ = applyOrientationSim(phase.lookAt, null, t, t, DT);
-      state.time += DT;
-      record(freeQ);
+      writeFrame(f, freeQ);
     }
-    info.holdSec = dur;
-    info.markers = [{ kf: 0, frame: info.startFrame, editable: true }];
+    return {
+      id: phase.id,
+      type: 'static',
+      startFrame,
+      frameCount: frames,
+      holdSec: dur,
+      markers: [{ kf: 0, frame: startFrame, editable: true }],
+      layer: 'overlay',
+    };
   }
 
   /** type:"follow"。FollowEvaluator を固定ステップで回す。プレビュー尺は minHold */

@@ -25,9 +25,9 @@ export class GenerateSequence extends Sequence {
     bottleRack.setVisible(false);
     overlay.hideAll();
 
-    // --- カメラを shot0 開始位置へ即時セット（DOM白フラッシュが画面を覆っている間） ---
-    const ph0 = gcfg.shots[0];
-    const startKf = ph0.type === 'static' ? ph0.pos : ph0.path[0];
+    // --- カメラを最初の base ショット開始位置へ即時セット（DOM白フラッシュ中） ---
+    const ph0 = gcfg.shots.find((s) => s.type !== 'static') ?? gcfg.shots[0];
+    const startKf = ph0.path ? ph0.path[0] : ph0.pos;
     world.camera.position.set(...(Array.isArray(startKf) ? startKf : startKf.p));
     world.camera.fov = ph0.fov ? ph0.fov[0] : world.camera.fov;
     world.camera.updateProjectionMatrix();
@@ -102,14 +102,15 @@ export class GenerateSequence extends Sequence {
     for (const ph of gcfg.shots) {
       if (this.bag.disposed) return;
 
+      // static は「上に被せる」絶対時刻オーバーレイ。逐次フローには乗せない
+      // （本番でのオーバーレイ再生＝絶対時刻↔弾性ホールドの対応付けは別途）。
+      if (ph.type === 'static') continue;
+
       if (ph.type === 'path') {
         await director.playPhase(ph);
         if (this.bag.disposed) return;
         // 写真の後退が終わったら平面→パーティクルへスワップして分解開始
         if (ph.id === 'photoRecede') this._swapToParticles();
-      } else if (ph.type === 'static') {
-        await director.playStatic(ph);
-        if (this.bag.disposed) return;
       } else {
         const hold = ph.type === 'follow' ? director.playFollow(ph) : director.playLoop(ph);
         try {

@@ -61,6 +61,11 @@ export class Timeline {
     return this.open_;
   }
 
+  /** 現在のプレイヘッド時刻（秒） */
+  get currentTime() {
+    return this.frame / FPS;
+  }
+
   toggle() {
     this.open_ ? this.close() : this.open();
   }
@@ -423,12 +428,13 @@ export class Timeline {
     this.playBtn.title = on ? '停止 (Space)' : '再生 (Space)';
   }
 
+  /** プレイヘッド位置の base ショット（overlay=static は除外。読み出し/ジャンプ用） */
   _phaseAt(frame) {
     if (!this.baked) return null;
     const i = Math.round(frame);
+    const base = this.baked.shots.filter((p) => p.layer !== 'overlay');
     return (
-      this.baked.shots.find((p) => i >= p.startFrame && i < p.startFrame + p.frameCount) ??
-      this.baked.shots[this.baked.shots.length - 1]
+      base.find((p) => i >= p.startFrame && i < p.startFrame + p.frameCount) ?? base[base.length - 1]
     );
   }
 
@@ -561,13 +567,14 @@ export class Timeline {
 
   _jumpPhase(dir) {
     if (!this.baked) return;
+    const base = this.baked.shots.filter((p) => p.layer !== 'overlay');
     const cur = this._phaseAt(this.frame);
-    const idx = this.baked.shots.indexOf(cur);
+    const idx = base.indexOf(cur);
     if (dir < 0 && Math.round(this.frame) > cur.startFrame + 2) {
       this._seek(cur.startFrame); // ショット途中なら自ショット先頭へ
       return;
     }
-    const next = this.baked.shots[Math.max(0, Math.min(idx + dir, this.baked.shots.length - 1))];
+    const next = base[Math.max(0, Math.min(idx + dir, base.length - 1))];
     this._seek(next.startFrame);
   }
 
@@ -685,19 +692,19 @@ function injectStyles() {
   border: 1px solid #2c2c35; border-radius: 5px; overflow: hidden;
   cursor: crosshair; touch-action: none;
 }
-/* 2レイヤー: メイン(上) 2..34px / 定点(下) 36..58px */
+/* 2レイヤー: 定点(上・オーバーレイ) 2..22px / メイン(下) 26..58px */
 .tlx-phase {
   position: absolute; box-sizing: border-box;
   border-right: 1px solid rgba(0,0,0,0.55); overflow: hidden; pointer-events: none;
 }
-.tlx-layer-main   { top: 2px; height: 32px; }
-.tlx-layer-static { top: 36px; bottom: 2px; }
+.tlx-layer-static { top: 2px; height: 20px; }
+.tlx-layer-main   { top: 26px; bottom: 2px; }
 .tlx-layer-divider {
-  position: absolute; left: 0; right: 0; top: 35px; height: 1px;
+  position: absolute; left: 0; right: 0; top: 24px; height: 1px;
   background: #2c2c35; pointer-events: none; z-index: 1;
 }
 .tlx-layer-tag {
-  position: absolute; left: 4px; top: 37px; font-size: 9px; color: #6e6147;
+  position: absolute; left: 4px; top: 3px; font-size: 9px; color: #6e6147;
   pointer-events: none; z-index: 1; letter-spacing: 1px;
 }
 .tlx-path   { background: linear-gradient(#33557f, #2a4569); }
@@ -717,8 +724,8 @@ function injectStyles() {
   color: #ffd166; cursor: pointer; font-size: 11px; line-height: 1;
   padding: 2px 3px; z-index: 2;
 }
-.tlx-layer-main-mk { top: 18px; }
-.tlx-layer-static-mk { top: 40px; }
+.tlx-layer-static-mk { top: 4px; }
+.tlx-layer-main-mk { top: 40px; }
 .tlx-marker:hover { color: #ffffff; transform: translateX(-50%) scale(1.35); }
 .tlx-marker-ro { color: #8888a0; cursor: default; }
 .tlx-playhead {

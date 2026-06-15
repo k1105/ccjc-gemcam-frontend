@@ -170,11 +170,16 @@ const afterAdd = await page.evaluate(() => {
   const shots = window.app.ctx.choreo.data.generate.shots;
   const baked = window.app.editor.timeline.baked;
   const newIdx = shots.findIndex((s) => s.type === 'static');
-  return { count: shots.length, hasStaticBake: baked.shots.some((s) => s.type === 'static'), newIdx };
+  const ov = baked.shots.find((s) => s.type === 'static');
+  const sf = ov ? ov.startFrame : -1;
+  // オーバーレイ区間の先頭フレームが static の pos([0,1,3]) で base を上書きしているか
+  const overridden = sf >= 0 && Math.hypot(baked.pos[sf * 3] - 0, baked.pos[sf * 3 + 1] - 1, baked.pos[sf * 3 + 2] - 3) < 1e-3;
+  return { count: shots.length, hasStaticBake: !!ov, newIdx, overridden, startFrame: sf };
 });
 assert(afterAdd.count === beforeShots + 1, `static ショット追加 (${beforeShots} -> ${afterAdd.count})`);
 assert(afterAdd.hasStaticBake, 'static ショットがベイクに反映');
 assert(afterAdd.newIdx === phShot.index + 1, `プレイヘッド(${phShot.id})直後に挿入 (index ${afterAdd.newIdx})`);
+assert(afterAdd.overridden, `オーバーレイが開始フレーム(${afterAdd.startFrame})で base を上書き`);
 await page.evaluate(() => window.app.editor.pathEditor._removeShot());
 await page.waitForTimeout(500);
 const afterRemove = await page.evaluate(() => window.app.ctx.choreo.data.generate.shots.length);

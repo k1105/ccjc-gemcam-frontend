@@ -499,7 +499,9 @@ export class PathEditor {
     }
 
     // ③ timing / fov / cut
+    if (typeof shot.start !== 'number') shot.start = 0;
     const tF = this.kfFolder.addFolder('③ timing / fov');
+    tF.add(shot, 'start', 0, 60, 0.05).name('start（開始秒・被せ位置）').onChange(() => this.onChanged?.());
     tF.add(shot, 'duration', 0.1, 15, 0.1).name('duration（秒）').onChange(() => this.onChanged?.());
     if (Array.isArray(shot.fov)) {
       tF.add(shot.fov, 0, 10, 120, 1).name('fov 開始').onChange(() => this.onChanged?.());
@@ -595,7 +597,10 @@ export class PathEditor {
   _addShot(type) {
     const shots = this._shots();
     let at;
+    let start = 0;
     if (type === 'static') {
+      const tl = this.timeline;
+      start = tl?.isOpen && tl.baked ? Number(tl.currentTime.toFixed(3)) : 0; // シークバー位置から開始
       const phId = this._playheadShotId();
       const idx = phId ? shots.findIndex((s) => s.id === phId) : -1;
       at = idx >= 0 ? idx + 1 : shots.length;
@@ -606,7 +611,7 @@ export class PathEditor {
     const id = this._uniqueId(type);
     const shot =
       type === 'static'
-        ? { id, type: 'static', duration: 2.0, pos: [0, 1, 3], lookAt: { mode: 'fixed', point: [0, 0.5, 0] }, fov: 45 }
+        ? { id, type: 'static', start, duration: 2.0, pos: [0, 1, 3], lookAt: { mode: 'fixed', point: [0, 0.5, 0] }, fov: 45 }
         : {
             id,
             type: 'path',

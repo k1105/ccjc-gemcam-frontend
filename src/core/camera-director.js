@@ -22,6 +22,8 @@ const _pos = new THREE.Vector3();
 const _head = new THREE.Vector3();
 const _center = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _lin = new THREE.Vector3();
+const MORPH_DEFAULT = 0.5; // follow/loop からの入口を線形モーフする秒数
 
 /**
  * choreography JSON の phase 定義（CatmullRom キーフレームパス）を再生するカメラ演出機。
@@ -40,8 +42,19 @@ export class CameraDirector {
     this._lookInitialized = false;
     this._activeTicks = new Set();
     this._activeTweens = new Set();
+    // 入口モーフ用: 直前フレームのカメラ速度（1フレーム差分）を追跡
+    this._lastFramePos = new THREE.Vector3();
+    this._lastVel = new THREE.Vector3();
+    this._haveLastPos = false;
     // camera-eval へ渡す注視ターゲット解決子（targets Map 経由）
     this._resolve = (name, out) => this._resolveTarget(name, out);
+  }
+
+  /** 各 tick 末に呼び、フレーム間のカメラ速度を更新（フェーズ跨ぎの入口モーフに使う） */
+  _track() {
+    if (this._haveLastPos) this._lastVel.subVectors(this.camera.position, this._lastFramePos);
+    this._lastFramePos.copy(this.camera.position);
+    this._haveLastPos = true;
   }
 
   registerTarget(name, supplier) {
@@ -180,6 +193,7 @@ export class CameraDirector {
           this.camera.updateProjectionMatrix();
         }
         this._applyOrientation(phase.lookAt, null, state.t, state.t, dt);
+        this._track();
       };
       this.world.addTickable(tick);
       this._activeTicks.add(tick);
@@ -220,11 +234,30 @@ export class CameraDirector {
     const fovTo = phase.fov ? phase.fov[1] : null;
     let elapsed = 0; // 線形フェーズ進行（lookAt.keys用。位置イージングとは独立）
 
+    // 直前が follow/loop（手続き的ホールド）なら、入口の速度を線形モーフして滑らかに繋ぐ
+    let prevBase = null;
+    if (ctx?.shots && ctx.index != null) {
+      for (let j = ctx.index - 1; j >= 0; j--) {
+        if (ctx.shots[j].type !== 'static') { prevBase = ctx.shots[j]; break; }
+      }
+    }
+    const morphDur =
+      prevBase && (prevBase.type === 'follow' || prevBase.type === 'loop')
+        ? phase.morphIn ?? MORPH_DEFAULT
+        : 0;
+    const morphStart = this.camera.position.clone();
+    const morphVel = this._lastVel.clone(); // 1フレーム差分（≒60fps基準）
+
     return new Promise((resolve) => {
       const tick = (dt) => {
         // state.t は gsap tween が ease 適用済みで駆動する eased 進行度。
         // 位置は時刻ベースで評価（アンカー times[i] の瞬間にその点。曲線編集で時刻不変）。
         samplePathByTime(curve, times, state.t, _pos);
+        if (morphDur > 0 && elapsed < morphDur) {
+          // 入口速度の線形延長 → パス位置 へ線形クロスフェード（速度が滑らかに移る）
+          _lin.copy(morphStart).addScaledVector(morphVel, elapsed * 60);
+          _pos.lerpVectors(_lin, _pos, elapsed / morphDur);
+        }
         this.camera.position.copy(_pos);
         if (fovFrom !== null) {
           this.camera.fov = fovFrom + (fovTo - fovFrom) * state.t;
@@ -232,6 +265,7 @@ export class CameraDirector {
         }
         elapsed += dt;
         this._applyOrientation(phase.lookAt, aimKeys, Math.min(elapsed / phase.duration, 1), state.t, dt);
+        this._track();
       };
       this.world.addTickable(tick);
       this._activeTicks.add(tick);
@@ -267,6 +301,7 @@ export class CameraDirector {
         lookOpts: this._lookOpts(),
       });
       if (target) this.camera.lookAt(this.lookCurrent);
+      this._track();
 
       if (ev.done) {
         this.world.removeTickable(tick);
@@ -300,6 +335,10 @@ export class CameraDirector {
     const ev = new FollowEvaluator(phase);
     let resolveFn = null;
     let releasing = false;
+    // 入口速度を線形モーフ（直前フェーズの動きから滑らかに周回へ）
+    const morphDur = phase.morphIn ?? MORPH_DEFAULT;
+    const morphStart = this.camera.position.clone();
+    const morphVel = this._lastVel.clone();
 
     const tick = (dt) => {
       // 追従ターゲット（先鋒）と周回中心（ボトル）を毎フレーム解決
@@ -323,7 +362,12 @@ export class CameraDirector {
         this._resolve,
         this._lookOpts()
       );
+      if (morphDur > 0 && ev.elapsed < morphDur) {
+        _lin.copy(morphStart).addScaledVector(morphVel, ev.elapsed * 60);
+        this.camera.position.lerpVectors(_lin, this.camera.position, ev.elapsed / morphDur);
+      }
       if (target) this.camera.lookAt(this.lookCurrent);
+      this._track();
 
       // 生成が速く終わっても minHold 秒は周回を見せてから抜ける
       if (releasing && ev.elapsed >= (phase.minHold ?? 0)) {
@@ -352,5 +396,6 @@ export class CameraDirector {
     for (const tween of this._activeTweens) tween.kill();
     this._activeTweens.clear();
     this._lookInitialized = false;
+    this._haveLastPos = false; // 速度追跡もリセット
   }
 }

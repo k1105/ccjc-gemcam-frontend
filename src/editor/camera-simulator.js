@@ -44,7 +44,9 @@ const _q = new THREE.Quaternion();
 const _recQuat = new THREE.Quaternion();
 const _lookM = new THREE.Matrix4();
 const _fwd = new THREE.Vector3();
+const _lin = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+const MORPH_DEFAULT = 0.5; // follow/loop からの入口を線形モーフする秒数
 
 /**
  * @param {object} gcfg choreo.data.generate
@@ -232,10 +234,11 @@ export function bakeGenerateCamera(gcfg, env) {
 
   /** type:"path"。位置は時刻ベース（samplePathByTime）。通過時刻はアンカーの times[i] で固定 */
   function stepPath(phase, info) {
+    const idx = gcfg.shots.indexOf(phase);
     // 隣接 path との境界 C1 連続化（共有点で接線を揃える）
     const nb = pathBoundaryNeighbors(
       gcfg.shots,
-      gcfg.shots.indexOf(phase),
+      idx,
       (s) => (s.relativeTo === 'bottle' ? bottleCenter : new THREE.Vector3())
     );
     const curve = buildCurve(
@@ -261,10 +264,33 @@ export function bakeGenerateCamera(gcfg, env) {
       frame: u <= 1e-6 ? info.startFrame : undefined,
     }));
 
+    // 直前が follow/loop（手続き的ホールド）なら、入口の速度を線形モーフして滑らかに繋ぐ
+    let prevBase = null;
+    for (let j = idx - 1; j >= 0; j--) if (gcfg.shots[j].type !== 'static') { prevBase = gcfg.shots[j]; break; }
+    const morph = prevBase && (prevBase.type === 'follow' || prevBase.type === 'loop');
+    const morphFrames = morph ? Math.min(Math.round((phase.morphIn ?? MORPH_DEFAULT) * FPS), frames) : 0;
+    const startPos = state.pos.clone();
+    const v0 = new THREE.Vector3();
+    if (morphFrames > 0) {
+      const li = posArr.length / 3 - 1; // 直前フレームの速度（1フレーム差分）
+      if (li >= 1) {
+        v0.set(
+          posArr[li * 3] - posArr[(li - 1) * 3],
+          posArr[li * 3 + 1] - posArr[(li - 1) * 3 + 1],
+          posArr[li * 3 + 2] - posArr[(li - 1) * 3 + 2]
+        );
+      }
+    }
+
     for (let f = 1; f <= frames; f++) {
       const t = easeFn(Math.min((f * DT) / phase.duration, 1)); // eased 進行
       const uLin = Math.min((f * DT) / phase.duration, 1); // 線形進行（lookAt.keys用）
       samplePathByTime(curve, times, t, state.pos);
+      if (morphFrames > 0 && f <= morphFrames) {
+        // 入口速度の線形延長 → パス位置 へ線形クロスフェード（速度が滑らかに移る）
+        _lin.copy(startPos).addScaledVector(v0, f);
+        state.pos.lerpVectors(_lin, state.pos, f / morphFrames);
+      }
       if (fovFrom !== null) state.fov = fovFrom + (fovTo - fovFrom) * t;
       const freeQ = applyOrientationSim(phase.lookAt, aimKeys, uLin, Math.min(t, 1), DT);
       state.time += DT;
@@ -339,9 +365,28 @@ export function bakeGenerateCamera(gcfg, env) {
     const frames = Math.max(1, Math.round(holdSec * FPS));
     const ev = new FollowEvaluator(phase);
 
+    // 入口速度を線形モーフ（直前フェーズの動きから滑らかに周回へ移す）
+    const morphFrames = Math.min(Math.round((phase.morphIn ?? MORPH_DEFAULT) * FPS), frames);
+    const startPos = state.pos.clone();
+    const v0 = new THREE.Vector3();
+    if (morphFrames > 0) {
+      const li = posArr.length / 3 - 1;
+      if (li >= 1) {
+        v0.set(
+          posArr[li * 3] - posArr[(li - 1) * 3],
+          posArr[li * 3 + 1] - posArr[(li - 1) * 3 + 1],
+          posArr[li * 3 + 2] - posArr[(li - 1) * 3 + 2]
+        );
+      }
+    }
+
     for (let f = 1; f <= frames; f++) {
       env.heroPos(_head, particleTime());
       ev.step(DT, _head, bottleCenter, state.pos, state.lookCurrent, resolveTarget);
+      if (morphFrames > 0 && f <= morphFrames) {
+        _lin.copy(startPos).addScaledVector(v0, f);
+        state.pos.lerpVectors(_lin, state.pos, f / morphFrames);
+      }
       state.time += DT;
       record();
     }

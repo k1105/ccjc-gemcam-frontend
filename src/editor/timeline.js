@@ -695,7 +695,9 @@ export class Timeline {
         if (moved) {
           this.pathEditor.onChanged?.(); // リベイク＋undo（移動確定）
         } else {
-          this._seek(Math.round((shot.start ?? 0) * FPS)); // クリック＝先頭へシーク
+          // クリック＝先頭へではなく、クリックした位置へシーク
+          const ratio = Math.max(0, Math.min((ev.clientX - rect.left) / rect.width, 1));
+          this._seek(Math.round(ratio * (total - 1)));
         }
       };
       el.addEventListener('pointermove', move);

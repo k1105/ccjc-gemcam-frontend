@@ -227,6 +227,22 @@ assert(
   `ベイクのオーバーレイ開始フレームが追従 (${dragRes.sf})`
 );
 
+console.log('--- click static block seeks to click pos (not head) ---');
+const clk = await page.evaluate(() => {
+  const tl = window.app.editor.timeline;
+  const ov = tl.baked.shots.find((s) => s.type === 'static');
+  const el = document.querySelector('.tlx-phase.tlx-static');
+  const r = el.getBoundingClientRect();
+  const t = document.querySelector('.tlx-track').getBoundingClientRect();
+  return { startFrame: ov.startFrame, x: r.x + r.width * 0.8, y: r.y + r.height / 2, total: tl.baked.totalFrames, tl: t.left, tw: t.width };
+});
+await page.mouse.click(clk.x, clk.y);
+await page.waitForTimeout(200);
+const clkFrame = await page.evaluate(() => Math.round(window.app.editor.timeline.frame));
+const clkExpected = Math.round(Math.max(0, Math.min((clk.x - clk.tl) / clk.tw, 1)) * (clk.total - 1));
+assert(Math.abs(clkFrame - clkExpected) <= 1, `定点クリックでクリック位置へシーク (f=${clkFrame}, 期待≈${clkExpected})`);
+assert(clkFrame > clk.startFrame + 1, `ブロック先頭にスナップしない (start=${clk.startFrame}, f=${clkFrame})`);
+
 console.log('--- static pan (注視点キーフレーム) ---');
 await page.evaluate(() => window.app.editor.pathEditor._setStaticLookMode('keyframe'));
 await page.waitForTimeout(600);

@@ -577,9 +577,20 @@ export class Timeline {
     const b = this.baked;
     this.track.innerHTML = '';
 
+    // 2レイヤー: 上=メイン（path/follow/loop）、下=定点（static）。区切り線と行ラベル
+    const divider = document.createElement('div');
+    divider.className = 'tlx-layer-divider';
+    this.track.appendChild(divider);
+    const tag = document.createElement('div');
+    tag.className = 'tlx-layer-tag';
+    tag.textContent = '定点';
+    this.track.appendChild(tag);
+
     for (const p of b.shots) {
+      const isStatic = p.type === 'static';
+      const layer = isStatic ? 'tlx-layer-static' : 'tlx-layer-main';
       const block = document.createElement('div');
-      block.className = `tlx-phase tlx-${p.type}`;
+      block.className = `tlx-phase tlx-${p.type} ${layer}`;
       block.style.left = `${(p.startFrame / b.totalFrames) * 100}%`;
       block.style.width = `${(p.frameCount / b.totalFrames) * 100}%`;
       const holdNote = p.type === 'follow' || p.type === 'loop' ? ' (hold)' : '';
@@ -589,7 +600,7 @@ export class Timeline {
 
       for (const m of p.markers ?? []) {
         const marker = document.createElement('div');
-        marker.className = `tlx-marker${m.editable ? '' : ' tlx-marker-ro'}`;
+        marker.className = `tlx-marker ${layer}-mk${m.editable ? '' : ' tlx-marker-ro'}`;
         marker.style.left = `${(m.frame / b.totalFrames) * 100}%`;
         marker.textContent = '◆';
         marker.title = m.editable
@@ -670,13 +681,24 @@ function injectStyles() {
 .tlx-readout { color: #ffd166; white-space: pre; }
 .tlx-spacer { flex: 1; }
 .tlx-track {
-  position: relative; height: 44px; background: #15151a;
+  position: relative; height: 60px; background: #15151a;
   border: 1px solid #2c2c35; border-radius: 5px; overflow: hidden;
   cursor: crosshair; touch-action: none;
 }
+/* 2レイヤー: メイン(上) 2..34px / 定点(下) 36..58px */
 .tlx-phase {
-  position: absolute; top: 0; bottom: 0; box-sizing: border-box;
+  position: absolute; box-sizing: border-box;
   border-right: 1px solid rgba(0,0,0,0.55); overflow: hidden; pointer-events: none;
+}
+.tlx-layer-main   { top: 2px; height: 32px; }
+.tlx-layer-static { top: 36px; bottom: 2px; }
+.tlx-layer-divider {
+  position: absolute; left: 0; right: 0; top: 35px; height: 1px;
+  background: #2c2c35; pointer-events: none; z-index: 1;
+}
+.tlx-layer-tag {
+  position: absolute; left: 4px; top: 37px; font-size: 9px; color: #6e6147;
+  pointer-events: none; z-index: 1; letter-spacing: 1px;
 }
 .tlx-path   { background: linear-gradient(#33557f, #2a4569); }
 .tlx-static { background: linear-gradient(#7f6533, #695227); }
@@ -686,15 +708,17 @@ function injectStyles() {
   background-image: repeating-linear-gradient(-45deg, rgba(255,255,255,0.06) 0 6px, transparent 6px 12px);
 }
 .tlx-phase-label {
-  position: absolute; left: 6px; top: 4px; color: #fff; white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6); pointer-events: none;
+  position: absolute; left: 6px; top: 3px; color: #fff; white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6); pointer-events: none; font-size: 11px;
 }
 .tlx-phase-label small { color: rgba(255,255,255,0.6); }
 .tlx-marker {
-  position: absolute; bottom: 1px; transform: translateX(-50%);
+  position: absolute; transform: translateX(-50%);
   color: #ffd166; cursor: pointer; font-size: 11px; line-height: 1;
   padding: 2px 3px; z-index: 2;
 }
+.tlx-layer-main-mk { top: 18px; }
+.tlx-layer-static-mk { top: 40px; }
 .tlx-marker:hover { color: #ffffff; transform: translateX(-50%) scale(1.35); }
 .tlx-marker-ro { color: #8888a0; cursor: default; }
 .tlx-playhead {

@@ -45,6 +45,7 @@ export class Editor {
     // --- カメラパス + タイムライン ---
     this.pathEditor = new PathEditor(this.ctx, this.gui);
     this.timeline = new Timeline(this.ctx, { pathEditor: this.pathEditor });
+    this.pathEditor.timeline = this.timeline; // 定点ショットをプレイヘッド直後に挿入するため参照
     this.pathEditor.onChanged = () => {
       this.timeline.invalidate();
       touch();

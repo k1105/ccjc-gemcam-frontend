@@ -155,17 +155,26 @@ await page.waitForTimeout(600);
 const framesAfter = await page.evaluate(() => window.app.editor.timeline.baked.totalFrames);
 assert(framesAfter === framesBefore + 60, `値変更で自動リベイク (${framesBefore} -> ${framesAfter})`);
 
-console.log('--- add/remove a static shot (Phase4b)');
+console.log('--- add/remove a static shot @playhead (Phase4b)');
+// プレイヘッドをショット#1(heroFollow)の中間へ → static はその直後(index 2)に入るはず
+const phShot = await page.evaluate(() => {
+  const tl = window.app.editor.timeline;
+  const s = tl.baked.shots[1];
+  tl._seek(s.startFrame + Math.floor(s.frameCount / 2));
+  return { id: s.id, index: 1 };
+});
 const beforeShots = await page.evaluate(() => window.app.ctx.choreo.data.generate.shots.length);
 await page.evaluate(() => window.app.editor.pathEditor._addShot('static'));
 await page.waitForTimeout(600);
 const afterAdd = await page.evaluate(() => {
   const shots = window.app.ctx.choreo.data.generate.shots;
   const baked = window.app.editor.timeline.baked;
-  return { count: shots.length, hasStaticBake: baked.shots.some((s) => s.type === 'static') };
+  const newIdx = shots.findIndex((s) => s.type === 'static');
+  return { count: shots.length, hasStaticBake: baked.shots.some((s) => s.type === 'static'), newIdx };
 });
 assert(afterAdd.count === beforeShots + 1, `static ショット追加 (${beforeShots} -> ${afterAdd.count})`);
 assert(afterAdd.hasStaticBake, 'static ショットがベイクに反映');
+assert(afterAdd.newIdx === phShot.index + 1, `プレイヘッド(${phShot.id})直後に挿入 (index ${afterAdd.newIdx})`);
 await page.evaluate(() => window.app.editor.pathEditor._removeShot());
 await page.waitForTimeout(500);
 const afterRemove = await page.evaluate(() => window.app.ctx.choreo.data.generate.shots.length);

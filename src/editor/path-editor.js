@@ -580,11 +580,29 @@ export class PathEditor {
     return `${base}-${n}`;
   }
 
-  /** 選択ショットの直後に新規ショットを挿入して選択する */
+  /** タイムラインのプレイヘッドが乗っているショットの id（なければ null） */
+  _playheadShotId() {
+    const tl = this.timeline;
+    if (!tl?.isOpen || !tl.baked) return null;
+    return tl._phaseAt(tl.frame)?.id ?? null;
+  }
+
+  /**
+   * 新規ショットを挿入して選択する。
+   * - static: シークバー（プレイヘッド）が乗っているショットの直後に挿入
+   * - path  : 選択中ショットの直後に挿入
+   */
   _addShot(type) {
     const shots = this._shots();
-    const cur = this._currentShot();
-    const at = cur ? shots.indexOf(cur) + 1 : shots.length;
+    let at;
+    if (type === 'static') {
+      const phId = this._playheadShotId();
+      const idx = phId ? shots.findIndex((s) => s.id === phId) : -1;
+      at = idx >= 0 ? idx + 1 : shots.length;
+    } else {
+      const cur = this._currentShot();
+      at = cur ? shots.indexOf(cur) + 1 : shots.length;
+    }
     const id = this._uniqueId(type);
     const shot =
       type === 'static'

@@ -99,6 +99,7 @@ export class Timeline {
     window.addEventListener('keydown', this._onKeyDown, true);
     this._applyFrame();
     this._render();
+    this.pathEditor._rebuildStreamViz?.(); // 粒子ストリームのハンドルを表示（particles 生成後）
   }
 
   close() {
@@ -109,6 +110,7 @@ export class Timeline {
     window.removeEventListener('keydown', this._onKeyDown, true);
     world.removeTickable(this._tick);
     this._disposeFreeView();
+    this.pathEditor._disposeStream?.(); // particles 破棄に合わせてストリームのハンドルも破棄
     this.stage.close();
     this.root.classList.add('tlx-hidden');
 
@@ -134,7 +136,10 @@ export class Timeline {
     clearTimeout(this._invalidateTimer);
     this._invalidateTimer = setTimeout(() => {
       if (!this.open_) return;
-      if (this._sceneDirty) this.stage.rebuildParticles();
+      if (this._sceneDirty) {
+        this.stage.rebuildParticles();
+        this.pathEditor._rebuildStreamViz?.(); // 新 particles インスタンスへハンドルを貼り直し
+      }
       this._sceneDirty = false;
       const keepTime = this.frame / FPS;
       this._bake();

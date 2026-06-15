@@ -10,6 +10,7 @@ const NORMAL_COLOR = 0xff4060;
 const HANDLE_COLOR = 0x46d3ff;
 const AIM_COLOR = 0x7cffb0; // 注視点(look)オーバーライド
 const STATIC_COLOR = 0xffa040; // 定点(static)ショットの位置マーカー
+const STREAM_COLOR = 0xff5cc8; // 粒子ストリームのベジェ制御点(p1/p2)
 
 /**
  * generate.shots を 3Dビューポート上で編集するショットエディタ。
@@ -68,6 +69,11 @@ export class PathEditor {
     this.staticAimSpheres = []; // 定点パン（注視点キーフレーム）の各点（緑、選択は黄）
     this.staticAimLine = null; // 注視点キーフレームを結ぶパン軌跡線
     this.staticPanel = null;
+    // 粒子ストリーム（generate）の制御点ハンドル（p1/p2）
+    this.streamP1Sphere = null;
+    this.streamP2Sphere = null;
+    this.streamLine = null;
+    this.streamMarks = []; // p0/p3 参照マーカー
 
     this.tc = new TransformControls(ctx.world.camera, ctx.world.renderer.domElement);
     this.tcHelper = this.tc.getHelper();
@@ -201,31 +207,26 @@ export class PathEditor {
     if (!shot) {
       this._clearPathViz();
       this._disposeStatic();
-      return;
-    }
-
-    if (shot.type === 'static') {
+    } else if (shot.type === 'static') {
       this.sel = { kind: 'static-pos', side: null };
       this._rebuildStaticViz();
       this._buildStaticPanel();
-      return;
-    }
-    if (!Array.isArray(shot.path)) {
+    } else if (!Array.isArray(shot.path)) {
       // follow / loop: ビューポート編集なし（数値は Parameters で）
       this._clearPathViz();
       this._disposeStatic();
       this._buildHoldPanel(shot);
-      return;
+    } else {
+      // path
+      const phase = shot;
+      const editable = phase.path.map((e, i) => (e === '@current' ? -1 : i)).filter((i) => i >= 0);
+      this.state.keyframe = editable.includes(this.state.keyframe) ? this.state.keyframe : editable[0] ?? 0;
+      this.sel = { kind: 'anchor', side: null };
+      this._rebuildViz();
+      this._buildKfPanel();
     }
-
-    // path
-    const phase = shot;
-    const editable = phase.path.map((e, i) => (e === '@current' ? -1 : i)).filter((i) => i >= 0);
-    this.state.keyframe = editable.includes(this.state.keyframe) ? this.state.keyframe : editable[0] ?? 0;
-    this.sel = { kind: 'anchor', side: null };
-
-    this._rebuildViz();
-    this._buildKfPanel();
+    // 粒子ストリームのハンドルはショット選択に依存せず常に表示（particles があれば）
+    this._rebuildStreamViz();
   }
 
   /** path 系ビューポート要素（アンカー/線/ハンドル/aim）を全消去 */
@@ -776,6 +777,92 @@ export class PathEditor {
       .disable();
   }
 
+  // ---- 粒子ストリーム（generate）の制御点ハンドル p1/p2 ----
+
+  /** プレビュー中の PhotoParticles（タイムラインの stage が保持）。無ければ null */
+  _particles() {
+    return this.timeline?.stage?.particles ?? null;
+  }
+
+  _disposeStream() {
+    if (this.tc.object === this.streamP1Sphere || this.tc.object === this.streamP2Sphere) {
+      this.tc.detach();
+      this.tcHelper.visible = false;
+    }
+    for (const m of this.streamMarks) {
+      this.viz.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+    }
+    this.streamMarks = [];
+    for (const k of ['streamP1Sphere', 'streamP2Sphere', 'streamLine']) {
+      const o = this[k];
+      if (!o) continue;
+      this.viz.remove(o);
+      o.geometry.dispose();
+      o.material.dispose();
+      this[k] = null;
+    }
+  }
+
+  _mkStreamHandle(pos, kind) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 14, 10),
+      new THREE.MeshBasicMaterial({ color: STREAM_COLOR, depthTest: false, transparent: true })
+    );
+    m.renderOrder = 1000;
+    m.position.copy(pos);
+    m.userData = { kind };
+    this.viz.add(m);
+    return m;
+  }
+
+  /**
+   * 粒子ストリームのベジェ(p0→p3, 制御点 p1/p2)を可視化＆ハンドル化。
+   * cfg.streamP1Offset/Offset から live stream(this._stream)を再同期するので、
+   * Parameters 編集・undo にも追従する。p0/p3 は写真位置/螺旋入口から導出（参照表示のみ）。
+   */
+  _rebuildStreamViz() {
+    this._disposeStream();
+    if (!this.active) return;
+    const s = this._particles()?._stream;
+    if (!s) return;
+    const cfg = this.ctx.choreo.data.generate.particles;
+    // cfg → live stream を再導出（uniform は s.p1/p2 を参照しているので即反映）
+    s.p1.copy(s.p0).lerp(s.p3, 0.33).add(new THREE.Vector3(...cfg.streamP1Offset));
+    s.p2.copy(s.p0).lerp(s.p3, 0.66).add(new THREE.Vector3(...cfg.streamP2Offset));
+
+    for (const p of [s.p0, s.p3]) {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.05, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0x888888, depthTest: false, transparent: true, opacity: 0.7 })
+      );
+      m.renderOrder = 998;
+      m.position.copy(p);
+      this.viz.add(m);
+      this.streamMarks.push(m);
+    }
+    this.streamP1Sphere = this._mkStreamHandle(s.p1, 'stream-p1');
+    this.streamP2Sphere = this._mkStreamHandle(s.p2, 'stream-p2');
+
+    const pts = new THREE.CubicBezierCurve3(s.p0, s.p1, s.p2, s.p3).getPoints(64);
+    this.streamLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: STREAM_COLOR, depthTest: false, transparent: true, opacity: 0.8 })
+    );
+    this.streamLine.renderOrder = 997;
+    this.viz.add(this.streamLine);
+  }
+
+  /** ドラッグ中: ストリーム曲線ラインだけ更新（球は dispose しない） */
+  _redrawStreamLine() {
+    const s = this._particles()?._stream;
+    if (!this.streamLine || !s) return;
+    const pts = new THREE.CubicBezierCurve3(s.p0, s.p1, s.p2, s.p3).getPoints(64);
+    this.streamLine.geometry.dispose();
+    this.streamLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+  }
+
   // ---- ショット管理（追加 / 削除 / 並べ替え / 選択） ----
 
   _uniqueId(base) {
@@ -1078,6 +1165,8 @@ export class PathEditor {
       ...this.staticAimSpheres,
       ...(this.staticLookSphere ? [this.staticLookSphere] : []),
       ...(this.staticPosSphere ? [this.staticPosSphere] : []),
+      ...(this.streamP1Sphere ? [this.streamP1Sphere] : []),
+      ...(this.streamP2Sphere ? [this.streamP2Sphere] : []),
       ...this.spheres,
     ];
     if (!targets.length) return;
@@ -1090,7 +1179,14 @@ export class PathEditor {
     const hits = this.raycaster.intersectObjects(targets, false);
     if (!hits.length) return;
     const ud = hits[0].object.userData;
-    if (ud.kind === 'static-aimkey') {
+    if (ud.kind === 'stream-p1' || ud.kind === 'stream-p2') {
+      this.sel = { kind: ud.kind, side: null };
+      const obj = ud.kind === 'stream-p1' ? this.streamP1Sphere : this.streamP2Sphere;
+      if (obj) {
+        this.tc.attach(obj);
+        this.tcHelper.visible = true;
+      }
+    } else if (ud.kind === 'static-aimkey') {
       this._selectAimKey(ud.index); // 注視点キーを選択（ギズモ＆パネル更新）
     } else if (ud.kind === 'static-pos' || ud.kind === 'static-look') {
       this.sel = { kind: ud.kind, side: null };
@@ -1197,6 +1293,23 @@ export class PathEditor {
     if (!obj) return;
     const ud = obj.userData;
 
+    if (ud.kind === 'stream-p1' || ud.kind === 'stream-p2') {
+      const s = this._particles()?._stream;
+      if (!s) return;
+      const cfg = this.ctx.choreo.data.generate.particles;
+      const frac = ud.kind === 'stream-p1' ? 0.33 : 0.66;
+      const off = obj.position.clone().sub(s.p0.clone().lerp(s.p3, frac));
+      // offset 配列は in-place 更新（Parameters の lil-gui バインドを壊さない）
+      const arr = ud.kind === 'stream-p1' ? cfg.streamP1Offset : cfg.streamP2Offset;
+      arr[0] = Number(off.x.toFixed(3));
+      arr[1] = Number(off.y.toFixed(3));
+      arr[2] = Number(off.z.toFixed(3));
+      // live stream（uniform 参照 Vector3）を mutate → GLSL/CPU 即同期
+      (ud.kind === 'stream-p1' ? s.p1 : s.p2).copy(obj.position);
+      this._redrawStreamLine();
+      this.onChanged?.();
+      return;
+    }
     if (ud.kind === 'static-aimkey') {
       const shot = this._currentShot();
       const k = shot.lookAt?.keys?.[ud.index];
@@ -1442,5 +1555,6 @@ export class PathEditor {
       this.line.material.dispose();
     }
     this._disposeStatic();
+    this._disposeStream();
   }
 }

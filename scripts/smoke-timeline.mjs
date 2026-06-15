@@ -306,6 +306,25 @@ assert(
   `look override 初期値が現在の注視点に一致 (${lo.look} vs ${lo.baked.map((v) => +v.toFixed(2))})`
 );
 
+console.log('--- particle stream p1/p2 handles + drag (Phase5) ---');
+const sh = await page.evaluate(() => {
+  const pe = window.app.editor.pathEditor;
+  return { hasP1: !!pe.streamP1Sphere, hasP2: !!pe.streamP2Sphere, hasLine: !!pe.streamLine };
+});
+assert(sh.hasP1 && sh.hasP2 && sh.hasLine, 'ストリームの p1/p2 ハンドルと曲線が表示');
+const sdrag = await page.evaluate(() => {
+  const pe = window.app.editor.pathEditor;
+  const cfg = window.app.ctx.choreo.data.generate.particles;
+  const before = cfg.streamP1Offset[0];
+  const p1before = pe._particles()._stream.p1.x;
+  pe.tc.attach(pe.streamP1Sphere); // ギズモ選択をエミュレート
+  pe.streamP1Sphere.position.x += 0.6;
+  pe._onGizmoChange();
+  return { before, after: cfg.streamP1Offset[0], p1moved: pe._particles()._stream.p1.x - p1before };
+});
+assert(Math.abs(sdrag.after - sdrag.before) > 0.5, `p1 ドラッグで streamP1Offset 更新 (${sdrag.before} -> ${sdrag.after})`);
+assert(Math.abs(sdrag.p1moved - 0.6) < 1e-3, `live stream(uniform 参照)が即同期 (Δ=${sdrag.p1moved.toFixed(3)})`);
+
 console.log('--- close (Esc): camera restore + resource release');
 await page.keyboard.press('Escape');
 await page.waitForFunction(() => !window.app.editor.timeline.isOpen);

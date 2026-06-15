@@ -3,12 +3,13 @@ import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag, disposeObject3D } from '../core/resources.js';
 import { PhotoParticles } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
+import { LightRig } from '../core/light-rig.js';
 
 /**
  * GENERATE: 撮影写真が3D平面としてカメラから遠ざかり、パーティクルに分解されて
  * 選択ボトルへ流れていく。カメラは hero パーティクルを追従し、ボトル付近を
  * フライバイ → 生成完了まで周回 → プルバック → 閃光 → RESULT。
- * choreography.json の generate.phases がカメラ編成を定義する。
+ * choreography.json の generate.shots がカメラ編成（ショット列）を定義する。
  */
 export class GenerateSequence extends Sequence {
   async enter(payload) {
@@ -25,12 +26,27 @@ export class GenerateSequence extends Sequence {
     bottleRack.setVisible(false);
     overlay.hideAll();
 
-    // --- カメラを phase0 開始位置へ即時セット（DOM白フラッシュが画面を覆っている間） ---
-    const ph0 = gcfg.phases[0];
-    world.camera.position.set(...ph0.path[0]);
+    // 配置ライト（generate.lights）をシーンへ反映＋経過秒でキーフレーム駆動
+    this.lightRig = new LightRig(world.scene);
+    this.lightRig.sync(gcfg.lights ?? []);
+    let lightElapsed = 0;
+    const lightTick = (dt) => {
+      lightElapsed += dt;
+      this.lightRig?.setTime(lightElapsed);
+    };
+    world.addTickable(lightTick);
+    this.bag.add(() => world.removeTickable(lightTick));
+
+    // --- カメラを最初の base ショット開始位置へ即時セット（DOM白フラッシュ中） ---
+    const ph0 = gcfg.shots.find((s) => s.type !== 'static') ?? gcfg.shots[0];
+    const startKf = ph0.path ? ph0.path[0] : ph0.pos;
+    world.camera.position.set(...(Array.isArray(startKf) ? startKf : startKf.p));
     world.camera.fov = ph0.fov ? ph0.fov[0] : world.camera.fov;
     world.camera.updateProjectionMatrix();
-    const lookPoint = new THREE.Vector3(...ph0.lookAt.point);
+    // 初期注視点: 単一 lookAt.point か、向きキーフレームの最初の point を採用（無ければ既定）
+    const lookArr =
+      ph0.lookAt?.point ?? ph0.lookAt?.keys?.find((k) => Array.isArray(k.point))?.point ?? [0, 0.5, 0];
+    const lookPoint = new THREE.Vector3(...lookArr);
     director.syncLookFromCamera(lookPoint);
     world.camera.lookAt(lookPoint);
 
@@ -94,12 +110,17 @@ export class GenerateSequence extends Sequence {
     const { overlay, manager, director } = this.ctx;
     let result = null;
 
-    // phases を順に再生。type:"loop"/"follow" が生成完了待ちのホールド点になる
-    for (const ph of gcfg.phases) {
+    // shots を順に再生。type:"loop"/"follow" が生成完了待ちのホールド点になる
+    for (let i = 0; i < gcfg.shots.length; i++) {
+      const ph = gcfg.shots[i];
       if (this.bag.disposed) return;
 
+      // static は「上に被せる」絶対時刻オーバーレイ。逐次フローには乗せない
+      // （本番でのオーバーレイ再生＝絶対時刻↔弾性ホールドの対応付けは別途）。
+      if (ph.type === 'static') continue;
+
       if (ph.type === 'path') {
-        await director.playPhase(ph);
+        await director.playPhase(ph, { shots: gcfg.shots, index: i }); // 隣接 path と境界連続化
         if (this.bag.disposed) return;
         // 写真の後退が終わったら平面→パーティクルへスワップして分解開始
         if (ph.id === 'photoRecede') this._swapToParticles();
@@ -165,6 +186,11 @@ export class GenerateSequence extends Sequence {
     director.stop();
     director.clearTargets();
     this.bag.disposeAll();
+
+    if (this.lightRig) {
+      this.lightRig.dispose();
+      this.lightRig = null;
+    }
 
     if (this.plane) {
       world.scene.remove(this.plane);

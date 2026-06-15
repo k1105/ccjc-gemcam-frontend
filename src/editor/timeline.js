@@ -25,7 +25,7 @@ import { PreviewStage } from './preview-stage.js';
  *   Space 再生/停止 ・ ←/→ ±1f（Shift ±10f）・ Home/End 先頭/末尾
  *   V 視点切替 ・ Esc 閉じる
  */
-const TRAJ_COLORS = { path: 0x5b8bd5, follow: 0xb07cd8, loop: 0x35b3a2 };
+const TRAJ_COLORS = { path: 0x5b8bd5, follow: 0xb07cd8, loop: 0x35b3a2, static: 0xd5a15b };
 const HERO_COLOR = 0xff8844;
 export class Timeline {
   constructor(ctx, { pathEditor }) {
@@ -50,6 +50,7 @@ export class Timeline {
     this.heroMarker = null;
     this.orbit = null;
     this._orbitInitialized = false;
+    this._freeCamSnapshot = null; // cam⇄free トグル間で俯瞰カメラ姿勢を保持
 
     this._tick = this._tick.bind(this);
     this._onKeyDown = this._onKeyDown.bind(this);
@@ -58,6 +59,11 @@ export class Timeline {
 
   get isOpen() {
     return this.open_;
+  }
+
+  /** 現在のプレイヘッド時刻（秒） */
+  get currentTime() {
+    return this.frame / FPS;
   }
 
   toggle() {
@@ -93,6 +99,7 @@ export class Timeline {
     window.addEventListener('keydown', this._onKeyDown, true);
     this._applyFrame();
     this._render();
+    this.pathEditor._rebuildStreamViz?.(); // 粒子ストリームのハンドルを表示（particles 生成後）
   }
 
   close() {
@@ -103,6 +110,7 @@ export class Timeline {
     window.removeEventListener('keydown', this._onKeyDown, true);
     world.removeTickable(this._tick);
     this._disposeFreeView();
+    this.pathEditor._disposeStream?.(); // particles 破棄に合わせてストリームのハンドルも破棄
     this.stage.close();
     this.root.classList.add('tlx-hidden');
 
@@ -128,7 +136,10 @@ export class Timeline {
     clearTimeout(this._invalidateTimer);
     this._invalidateTimer = setTimeout(() => {
       if (!this.open_) return;
-      if (this._sceneDirty) this.stage.rebuildParticles();
+      if (this._sceneDirty) {
+        this.stage.rebuildParticles();
+        this.pathEditor._rebuildStreamViz?.(); // 新 particles インスタンスへハンドルを貼り直し
+      }
       this._sceneDirty = false;
       const keepTime = this.frame / FPS;
       this._bake();
@@ -181,7 +192,8 @@ export class Timeline {
       this.ghost.position.set(px, py, pz);
       this.ghost.fov = b.fov[i];
       this.ghost.updateProjectionMatrix();
-      this.ghost.lookAt(lx, ly, lz);
+      if (b.quat) this.ghost.quaternion.fromArray(b.quat, i * 4);
+      else this.ghost.lookAt(lx, ly, lz);
       this.ghost.updateMatrixWorld(true);
       this.helper.update();
       const attr = this.lookLine.geometry.attributes.position;
@@ -198,7 +210,8 @@ export class Timeline {
         world.camera.fov = b.fov[i];
         world.camera.updateProjectionMatrix();
       }
-      world.camera.lookAt(lx, ly, lz);
+      if (b.quat) world.camera.quaternion.fromArray(b.quat, i * 4);
+      else world.camera.lookAt(lx, ly, lz);
     }
     this.stage.setTime(i / FPS, b.swapTime);
   }
@@ -222,7 +235,9 @@ export class Timeline {
       this.lookLine.visible = true;
       this.traj.visible = true;
       this.heroMarker.visible = true;
-      // 初回のみ軌跡全体が収まる俯瞰位置へ（以降はユーザーの操作位置を維持）
+      // 初回のみ軌跡全体が収まる俯瞰位置へ。2回目以降は前回の俯瞰位置を復元
+      // （cam モードは world.camera をベイク位置で上書きするため、復元しないと
+      //   俯瞰へ戻ったときにパス内部へ飛んでしまう）
       if (!this._orbitInitialized) {
         const { center, radius } = this._trajBounds();
         world.camera.fov = 45;
@@ -234,10 +249,21 @@ export class Timeline {
         );
         this.orbit.target.copy(center);
         this._orbitInitialized = true;
+      } else if (this._freeCamSnapshot) {
+        world.camera.position.copy(this._freeCamSnapshot.pos);
+        world.camera.fov = this._freeCamSnapshot.fov;
+        world.camera.updateProjectionMatrix();
+        this.orbit.target.copy(this._freeCamSnapshot.target);
       }
       this.orbit.enabled = true;
       this.orbit.update();
     } else {
+      // cam へ抜ける直前の俯瞰カメラ姿勢を保存（次に free へ戻すとき復元）
+      this._freeCamSnapshot = {
+        pos: world.camera.position.clone(),
+        fov: world.camera.fov,
+        target: this.orbit.target.clone(),
+      };
       this.orbit.enabled = false;
       this.helper.visible = false;
       this.lookLine.visible = false;
@@ -297,7 +323,7 @@ export class Timeline {
       child.material.dispose();
     }
     const b = this.baked;
-    for (const p of b.phases) {
+    for (const p of b.shots) {
       const pts = [];
       const end = Math.min(p.startFrame + p.frameCount, b.totalFrames - 1);
       for (let f = p.startFrame; f <= end; f += 2) {
@@ -389,6 +415,7 @@ export class Timeline {
     this.ghost = null;
     this.viewMode = 'cam';
     this._orbitInitialized = false;
+    this._freeCamSnapshot = null;
     if (this.viewBtn) this.viewBtn.textContent = '視点: Camera';
   }
 
@@ -406,12 +433,13 @@ export class Timeline {
     this.playBtn.title = on ? '停止 (Space)' : '再生 (Space)';
   }
 
+  /** プレイヘッド位置の base ショット（overlay=static は除外。読み出し/ジャンプ用） */
   _phaseAt(frame) {
     if (!this.baked) return null;
     const i = Math.round(frame);
+    const base = this.baked.shots.filter((p) => p.layer !== 'overlay');
     return (
-      this.baked.phases.find((p) => i >= p.startFrame && i < p.startFrame + p.frameCount) ??
-      this.baked.phases[this.baked.phases.length - 1]
+      base.find((p) => i >= p.startFrame && i < p.startFrame + p.frameCount) ?? base[base.length - 1]
     );
   }
 
@@ -421,6 +449,8 @@ export class Timeline {
     // lil-gui のテキスト入力等は素通し
     const tag = e.target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    // Cmd/Ctrl ショートカット（undo/redo 等）はエディタ側へ通す
+    if (e.metaKey || e.ctrlKey) return;
 
     const step = e.shiftKey ? 10 : 1;
     let consumed = true;
@@ -542,53 +572,253 @@ export class Timeline {
 
   _jumpPhase(dir) {
     if (!this.baked) return;
+    const base = this.baked.shots.filter((p) => p.layer !== 'overlay');
     const cur = this._phaseAt(this.frame);
-    const idx = this.baked.phases.indexOf(cur);
+    const idx = base.indexOf(cur);
     if (dir < 0 && Math.round(this.frame) > cur.startFrame + 2) {
-      this._seek(cur.startFrame); // フェーズ途中なら自フェーズ先頭へ
+      this._seek(cur.startFrame); // ショット途中なら自ショット先頭へ
       return;
     }
-    const next = this.baked.phases[Math.max(0, Math.min(idx + dir, this.baked.phases.length - 1))];
+    const next = base[Math.max(0, Math.min(idx + dir, base.length - 1))];
     this._seek(next.startFrame);
   }
 
-  /** トラック（フェーズブロック・マーカー・プレイヘッド）を再構築 */
+  /** トラック（全レーンのブロック・マーカー・プレイヘッド）を再構築 */
   _render() {
     if (!this.baked) return;
-    const b = this.baked;
     this.track.innerHTML = '';
-
-    for (const p of b.phases) {
-      const block = document.createElement('div');
-      block.className = `tlx-phase tlx-${p.type}`;
-      block.style.left = `${(p.startFrame / b.totalFrames) * 100}%`;
-      block.style.width = `${(p.frameCount / b.totalFrames) * 100}%`;
-      const holdNote = p.type === 'path' ? '' : ' (hold)';
-      block.innerHTML = `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`;
-      block.title = `${p.id} — クリックでシーク`;
-      this.track.appendChild(block);
-
-      for (const m of p.markers ?? []) {
-        const marker = document.createElement('div');
-        marker.className = `tlx-marker${m.editable ? '' : ' tlx-marker-ro'}`;
-        marker.style.left = `${(m.frame / b.totalFrames) * 100}%`;
-        marker.textContent = '◆';
-        marker.title = m.editable
-          ? `${p.id} keyframe #${m.kf} — クリックで編集対象に`
-          : `${p.id} #${m.kf} (@current)`;
-        marker.addEventListener('pointerdown', (e) => {
-          e.stopPropagation();
-          this._seek(m.frame);
-          if (m.editable) this.pathEditor.selectKeyframe(p.id, m.kf);
-        });
-        this.track.appendChild(marker);
-      }
-    }
+    // 上から順にレーン（横ストリップ）を描く。現状はカメラの2レーンのみ。
+    // ライト/粒子は今後 _collectLanes() に append するだけで積める。
+    for (const lane of this._collectLanes()) this._renderLane(lane);
 
     this.playhead = document.createElement('div');
     this.playhead.className = 'tlx-playhead';
     this.track.appendChild(this.playhead);
     this._renderPlayhead();
+    this._highlightSelectedShot();
+  }
+
+  /**
+   * タイムラインの全レーンを上から順に返す（汎用トラック・モデル）。
+   * 各レーンは clips（ブロック）と markers（◆）と操作（クリック/ドラッグ）を自給する。
+   * laneClass が CSS の縦位置を決める（cam=既存の tlx-layer-static / tlx-layer-main）。
+   * @returns {Array<{laneClass:string, divider?:boolean, tag?:string, clips:Array}>}
+   */
+  _collectLanes() {
+    return this._cameraLanes();
+    // 今後: return [...this._cameraLanes(), ...this._lightLanes(), ...this._particleLanes()];
+  }
+
+  /** カメラトラック: 定点(オーバーレイ=上) / メイン(base=下) の2レーン */
+  _cameraLanes() {
+    const b = this.baked;
+    const total = b.totalFrames;
+    const toClip = (p) => {
+      const isStatic = p.type === 'static';
+      const holdNote = p.type === 'follow' || p.type === 'loop' ? ' (hold)' : '';
+      return {
+        id: p.id,
+        className: `tlx-phase tlx-${p.type}`,
+        leftPct: (p.startFrame / total) * 100,
+        widthPct: (p.frameCount / total) * 100,
+        labelHtml: `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`,
+        // 定点ブロック=掴んでドラッグで start 移動。それ以外=クリックで選択＋シーク
+        title: isStatic
+          ? `${p.id} — クリックで選択 / ドラッグで開始位置を移動`
+          : `${p.id} — クリックで選択＋シーク`,
+        onClip: isStatic
+          ? (el) => this._attachShotDrag(el, p.id)
+          : (el) => this._attachBlockSelect(el, p.id),
+        markers: (p.markers ?? []).map((m) => this._cameraMarkerSpec(p, m, isStatic)),
+      };
+    };
+    return [
+      {
+        laneClass: 'tlx-layer-static',
+        divider: true,
+        tag: '定点',
+        clips: b.shots.filter((p) => p.type === 'static').map(toClip),
+      },
+      {
+        laneClass: 'tlx-layer-main',
+        clips: b.shots.filter((p) => p.type !== 'static').map(toClip),
+      },
+    ];
+  }
+
+  /** カメラの◆マーカー1つ分の spec（クリック=シーク＋選択、定点編集可=ドラッグでstart移動） */
+  _cameraMarkerSpec(p, m, isStatic) {
+    const base = {
+      id: p.id,
+      leftPct: (m.frame / this.baked.totalFrames) * 100,
+      editable: m.editable,
+    };
+    if (isStatic && m.editable) {
+      // 定点マーカーも掴んで左右ドラッグで start を移動（クリックは選択）
+      return { ...base, title: `${p.id} — ドラッグで開始位置を移動`, attachDrag: true };
+    }
+    return {
+      ...base,
+      title: m.editable
+        ? `${p.id} keyframe #${m.kf} — クリックで編集対象に`
+        : `${p.id} #${m.kf} (@current)`,
+      onClick: () => {
+        this._seek(m.frame);
+        if (!m.editable) return;
+        // 定点ショットはショット選択、path はキーフレーム選択
+        const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === p.id);
+        if (shot?.type === 'static') this.pathEditor.selectShot(p.id);
+        else this.pathEditor.selectKeyframe(p.id, m.kf);
+      },
+    };
+  }
+
+  /** 1レーン分（区切り線・行ラベル・clips・markers）を track へ描く */
+  _renderLane(lane) {
+    if (lane.divider) {
+      const divider = document.createElement('div');
+      divider.className = 'tlx-layer-divider';
+      this.track.appendChild(divider);
+    }
+    if (lane.tag) {
+      const tag = document.createElement('div');
+      tag.className = 'tlx-layer-tag';
+      tag.textContent = lane.tag;
+      this.track.appendChild(tag);
+    }
+    for (const clip of lane.clips) {
+      const block = document.createElement('div');
+      block.className = `${clip.className} ${lane.laneClass}`;
+      block.dataset.shot = clip.id;
+      block.style.left = `${clip.leftPct}%`;
+      block.style.width = `${clip.widthPct}%`;
+      block.innerHTML = clip.labelHtml ?? '';
+      if (clip.title) block.title = clip.title;
+      this.track.appendChild(block);
+      clip.onClip?.(block);
+      for (const m of clip.markers ?? []) this._renderMarker(m, lane);
+    }
+  }
+
+  /** ◆マーカー1つを track へ描く（spec の onClick / attachDrag に従う） */
+  _renderMarker(m, lane) {
+    const marker = document.createElement('div');
+    marker.className = `tlx-marker ${lane.laneClass}-mk${m.editable ? '' : ' tlx-marker-ro'}`;
+    marker.dataset.shot = m.id;
+    marker.style.left = `${m.leftPct}%`;
+    marker.textContent = '◆';
+    if (m.title) marker.title = m.title;
+    if (m.attachDrag) {
+      this._attachShotDrag(marker, m.id);
+    } else if (m.onClick) {
+      marker.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        m.onClick();
+      });
+    }
+    this.track.appendChild(marker);
+  }
+
+  /** 選択中ショット（pathEditor.state.phaseId）のブロックを枠でハイライト */
+  _highlightSelectedShot() {
+    const selId = this.pathEditor?.state?.phaseId;
+    this.track?.querySelectorAll('.tlx-phase').forEach((el) => {
+      el.classList.toggle('tlx-selected', el.dataset.shot === selId);
+    });
+  }
+
+  /**
+   * 定点(static)オーバーレイをタイムラインで掴んで左右ドラッグ → start（被せ開始秒）を移動。
+   * ドラッグ中は DOM 位置だけ動かし、離した時に1回だけリベイク（onChanged）する。
+   * 動かさなければクリック扱い＝シーク＆選択。
+   */
+  _attachShotDrag(el, shotId) {
+    el.style.pointerEvents = 'auto';
+    el.style.cursor = 'ew-resize';
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!this.baked) return;
+      const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === shotId);
+      if (!shot) return;
+      const rect = this.track.getBoundingClientRect();
+      const total = this.baked.totalFrames;
+      const startX = e.clientX;
+      const startStart = shot.start ?? 0;
+      const maxStart = Math.max(0, (total - 1) / FPS);
+      let moved = false;
+      el.setPointerCapture(e.pointerId);
+
+      const move = (ev) => {
+        if (Math.abs(ev.clientX - startX) > 3) moved = true;
+        const dFrames = ((ev.clientX - startX) / rect.width) * total;
+        let ns = startStart + dFrames / FPS;
+        ns = Math.max(0, Math.min(ns, maxStart));
+        ns = Math.round(ns * FPS) / FPS; // フレーム量子化
+        shot.start = Number(ns.toFixed(3));
+        this._repositionStatic(shotId);
+        this.readout.textContent = `${shot.id}  start ${ns.toFixed(2)}s（ドラッグ中）`;
+      };
+      const up = (ev) => {
+        el.releasePointerCapture(ev.pointerId);
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        this.pathEditor.selectShot(shotId);
+        if (moved) {
+          this.pathEditor.onChanged?.(); // リベイク＋undo（移動確定）
+        } else {
+          // クリック＝先頭へではなく、クリックした位置へシーク
+          const ratio = Math.max(0, Math.min((ev.clientX - rect.left) / rect.width, 1));
+          this._seek(Math.round(ratio * (total - 1)));
+        }
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    });
+  }
+
+  /**
+   * base ショット（path/follow/loop）のブロック: クリックでショット選択＋シーク、
+   * ドラッグでスクラブ（トラックと同じ）。
+   */
+  _attachBlockSelect(block, shotId) {
+    block.style.pointerEvents = 'auto';
+    block.style.cursor = 'pointer';
+    block.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (!this.baked) return;
+      block.setPointerCapture(e.pointerId);
+      const seekTo = (ev) => {
+        const r = this.track.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min((ev.clientX - r.left) / r.width, 1));
+        this._seek(Math.round(ratio * (this.baked.totalFrames - 1)));
+      };
+      seekTo(e);
+      this.pathEditor.selectShot(shotId);
+      const move = (ev) => seekTo(ev);
+      const up = (ev) => {
+        block.releasePointerCapture?.(ev.pointerId);
+        block.removeEventListener('pointermove', move);
+        block.removeEventListener('pointerup', up);
+      };
+      block.addEventListener('pointermove', move);
+      block.addEventListener('pointerup', up);
+    });
+  }
+
+  /** ドラッグ中の定点ブロック/マーカーの left/width だけ更新（リベイクしない） */
+  _repositionStatic(shotId) {
+    const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === shotId);
+    if (!shot || !this.baked) return;
+    const total = this.baked.totalFrames;
+    const leftPct = (((shot.start ?? 0) * FPS) / total) * 100;
+    const block = this.track.querySelector(`.tlx-phase[data-shot="${shotId}"]`);
+    if (block) {
+      block.style.left = `${leftPct}%`;
+      block.style.width = `${(((shot.duration ?? 1) * FPS) / total) * 100}%`;
+    }
+    const mk = this.track.querySelector(`.tlx-marker[data-shot="${shotId}"]`);
+    if (mk) mk.style.left = `${leftPct}%`;
   }
 
   _renderPlayhead() {
@@ -628,7 +858,7 @@ function injectStyles() {
   style.id = 'tlx-style';
   style.textContent = `
 #tlx-panel {
-  position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 1001;
+  position: fixed; left: 354px; right: 12px; bottom: 12px; z-index: 1001;
   background: rgba(18, 18, 22, 0.92); color: #e8e8ee;
   border: 1px solid #3a3a44; border-radius: 8px;
   font: 12px/1.4 'SF Mono', Menlo, Consolas, monospace;
@@ -647,30 +877,48 @@ function injectStyles() {
 .tlx-readout { color: #ffd166; white-space: pre; }
 .tlx-spacer { flex: 1; }
 .tlx-track {
-  position: relative; height: 44px; background: #15151a;
+  position: relative; height: 60px; background: #15151a;
   border: 1px solid #2c2c35; border-radius: 5px; overflow: hidden;
   cursor: crosshair; touch-action: none;
 }
+/* 2レイヤー: 定点(上・オーバーレイ) 2..22px / メイン(下) 26..58px */
 .tlx-phase {
-  position: absolute; top: 0; bottom: 0; box-sizing: border-box;
+  position: absolute; box-sizing: border-box;
   border-right: 1px solid rgba(0,0,0,0.55); overflow: hidden; pointer-events: none;
 }
+.tlx-layer-static { top: 2px; height: 20px; }
+.tlx-layer-main   { top: 26px; bottom: 2px; }
+.tlx-layer-divider {
+  position: absolute; left: 0; right: 0; top: 24px; height: 1px;
+  background: #2c2c35; pointer-events: none; z-index: 1;
+}
+.tlx-layer-tag {
+  position: absolute; left: 4px; top: 3px; font-size: 9px; color: #6e6147;
+  pointer-events: none; z-index: 1; letter-spacing: 1px;
+}
 .tlx-path   { background: linear-gradient(#33557f, #2a4569); }
+.tlx-static { background: linear-gradient(#7f6533, #695227); }
 .tlx-follow { background: linear-gradient(#6a4a8c, #573b75); }
 .tlx-loop   { background: linear-gradient(#2a7d72, #226359); }
 .tlx-follow, .tlx-loop {
   background-image: repeating-linear-gradient(-45deg, rgba(255,255,255,0.06) 0 6px, transparent 6px 12px);
 }
+.tlx-phase.tlx-selected {
+  box-shadow: inset 0 0 0 2px #ffd166, 0 0 6px rgba(255, 209, 102, 0.5);
+  border-radius: 3px; z-index: 2;
+}
 .tlx-phase-label {
-  position: absolute; left: 6px; top: 4px; color: #fff; white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6); pointer-events: none;
+  position: absolute; left: 6px; top: 3px; color: #fff; white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6); pointer-events: none; font-size: 11px;
 }
 .tlx-phase-label small { color: rgba(255,255,255,0.6); }
 .tlx-marker {
-  position: absolute; bottom: 1px; transform: translateX(-50%);
+  position: absolute; transform: translateX(-50%);
   color: #ffd166; cursor: pointer; font-size: 11px; line-height: 1;
   padding: 2px 3px; z-index: 2;
 }
+.tlx-layer-static-mk { top: 4px; }
+.tlx-layer-main-mk { top: 40px; }
 .tlx-marker:hover { color: #ffffff; transform: translateX(-50%) scale(1.35); }
 .tlx-marker-ro { color: #8888a0; cursor: default; }
 .tlx-playhead {

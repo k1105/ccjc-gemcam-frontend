@@ -178,7 +178,7 @@ const phShot = await page.evaluate(() => {
   return { id: s.id, index: 1 };
 });
 const beforeShots = await page.evaluate(() => window.app.ctx.choreo.data.generate.shots.length);
-await page.evaluate(() => window.app.editor.pathEditor._addShot('static'));
+await page.evaluate(() => window.app.editor.pathEditor._addShot());
 await page.waitForTimeout(600);
 const afterAdd = await page.evaluate(() => {
   const shots = window.app.ctx.choreo.data.generate.shots;

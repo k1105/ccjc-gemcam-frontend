@@ -87,14 +87,12 @@ export class PathEditor {
     // 選択はタイムラインのブロック/◆クリック・3Dクリックで。選択中はタイムライン枠で表示）
     this.shotsFolder = this.gui.addFolder('Shots（再生順・管理）');
     const acts = {
-      addStatic: () => this._addShot('static'),
-      addPath: () => this._addShot('path'),
+      addStatic: () => this._addShot(),
       up: () => this._moveShot(-1),
       down: () => this._moveShot(1),
       remove: () => this._removeShot(),
     };
-    this.shotsFolder.add(acts, 'addStatic').name('＋ 定点ショット（選択の直後）');
-    this.shotsFolder.add(acts, 'addPath').name('＋ パスショット（選択の直後）');
+    this.shotsFolder.add(acts, 'addStatic').name('＋ 定点ショット（シークバー位置に被せる）');
     this.shotsFolder.add(acts, 'up').name('↑ 前へ移動');
     this.shotsFolder.add(acts, 'down').name('↓ 後へ移動');
     this.shotsFolder.add(acts, 'remove').name('🗑 ショット削除');
@@ -754,36 +752,27 @@ export class PathEditor {
   }
 
   /**
-   * 新規ショットを挿入して選択する。
-   * - static: シークバー（プレイヘッド）が乗っているショットの直後に挿入
-   * - path  : 選択中ショットの直後に挿入
+   * 定点(static)オーバーレイを追加して選択する。
+   * シークバー（プレイヘッド）位置から start で被せ、playhead が乗っている base
+   * ショットの直後に挿入する（配列順は表示用。実時刻は start が決める）。
    */
-  _addShot(type) {
+  _addShot() {
     const shots = this._shots();
-    let at;
-    let start = 0;
-    if (type === 'static') {
-      const tl = this.timeline;
-      start = tl?.isOpen && tl.baked ? Number(tl.currentTime.toFixed(3)) : 0; // シークバー位置から開始
-      const phId = this._playheadShotId();
-      const idx = phId ? shots.findIndex((s) => s.id === phId) : -1;
-      at = idx >= 0 ? idx + 1 : shots.length;
-    } else {
-      const cur = this._currentShot();
-      at = cur ? shots.indexOf(cur) + 1 : shots.length;
-    }
-    const id = this._uniqueId(type);
-    const shot =
-      type === 'static'
-        ? { id, type: 'static', start, duration: 2.0, pos: [0, 1, 3], lookAt: { mode: 'fixed', point: [0, 0.5, 0] }, fov: 45 }
-        : {
-            id,
-            type: 'path',
-            duration: 2.0,
-            ease: 'none',
-            path: [[0, 1, 3], [0, 1, 1]],
-            lookAt: { mode: 'fixed', point: [0, 0.5, 0] },
-          };
+    const tl = this.timeline;
+    const start = tl?.isOpen && tl.baked ? Number(tl.currentTime.toFixed(3)) : 0; // シークバー位置から開始
+    const phId = this._playheadShotId();
+    const idx = phId ? shots.findIndex((s) => s.id === phId) : -1;
+    const at = idx >= 0 ? idx + 1 : shots.length;
+    const id = this._uniqueId('static');
+    const shot = {
+      id,
+      type: 'static',
+      start,
+      duration: 2.0,
+      pos: [0, 1, 3],
+      lookAt: { mode: 'fixed', point: [0, 0.5, 0] },
+      fov: 45,
+    };
     shots.splice(at, 0, shot);
     this.state.phaseId = id;
     this.state.keyframe = 0;

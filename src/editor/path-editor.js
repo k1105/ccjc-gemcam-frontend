@@ -256,7 +256,7 @@ export class PathEditor {
       .disable();
 
     // キーフレームの追加 / 削除（選択中の path ショットに対して）
-    this.kfFolder.add(this.state, 'addKeyframe').name('＋ keyframe（選択の直後に挿入）');
+    this.kfFolder.add(this.state, 'addKeyframe').name('＋ keyframe（シークバー位置に追加）');
     this.kfFolder.add(this.state, 'removeKeyframe').name('− keyframe（選択を削除）');
 
     if (entry === '@current') {
@@ -1248,10 +1248,51 @@ export class PathEditor {
     this.onChanged?.();
   }
 
-  /** 選択キーフレームの直後に挿入（次点との中点。末尾なら少し先へ）。auto で挿入 */
+  /**
+   * キーフレーム（アンカー）追加。シークバー（プレイヘッド）が乗っている path ショットの、
+   * その時刻のカメラ位置＝曲線上の点に新しいアンカーを挿入する。
+   * - playhead 位置の base ショットを対象にする（path 以外なら不可メッセージ）
+   * - 挿入位置は playhead 直前のアンカーの直後（markers の通過フレームで判定）
+   * - タイムライン未起動時は従来の中点挿入にフォールバック
+   */
   _addKeyframe() {
+    const tl = this.timeline;
+    if (!tl?.isOpen || !tl.baked) return this._addKeyframeMidpoint();
+
+    const F = Math.round(tl.frame);
+    const info = tl._phaseAt(F); // playhead が乗っている base ショット情報
+    const shot = info && this._shots().find((s) => s.id === info.id);
+    if (!shot) return;
+    if (!Array.isArray(shot.path)) {
+      tl._flashMessage?.('ホールド(follow/loop)ショットにはアンカーを追加できません');
+      return;
+    }
+
+    // playhead 直前のアンカー index（markers の通過フレームから）
+    let prevKf = 0;
+    for (const m of info.markers ?? []) if (m.frame <= F) prevKf = m.kf;
+
+    // 新アンカー = その時刻のベイク済みカメラ位置（曲線上）。relativeTo はローカルへ戻す
+    const off = this._shotOffset(shot);
+    const local = new THREE.Vector3(
+      tl.baked.pos[F * 3],
+      tl.baked.pos[F * 3 + 1],
+      tl.baked.pos[F * 3 + 2]
+    ).sub(off);
+    const anchor = [Number(local.x.toFixed(3)), Number(local.y.toFixed(3)), Number(local.z.toFixed(3))];
+
+    shot.path.splice(prevKf + 1, 0, anchor);
+    this.state.phaseId = shot.id; // playhead のショットを選択対象に
+    this.state.keyframe = prevKf + 1;
+    this.sel = { kind: 'anchor', side: null };
+    this.rebuild();
+    this.onChanged?.();
+  }
+
+  /** フォールバック: 選択キーフレームの直後に中点挿入（タイムライン未起動時） */
+  _addKeyframeMidpoint() {
     const phase = this._currentPhase();
-    if (!phase) return; // path ショット選択時のみ
+    if (!phase) return;
     const i = this.state.keyframe;
     const cur = this._localPos(phase.path[i]);
     const nextEntry = phase.path[i + 1];

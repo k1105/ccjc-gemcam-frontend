@@ -246,6 +246,33 @@ await page.waitForTimeout(500);
 const afterRemove = await page.evaluate(() => window.app.ctx.choreo.data.generate.shots.length);
 assert(afterRemove === beforeShots, `static ショット削除で復元 (${afterRemove})`);
 
+console.log('--- ＋keyframe at seekbar inserts anchor on curve ---');
+const kfPre = await page.evaluate(() => {
+  const tl = window.app.editor.timeline;
+  const info = tl.baked.shots.find((s) => s.id === 'heroFollow');
+  const F = info.startFrame + Math.floor(info.frameCount / 2);
+  tl._seek(F);
+  window.app.editor.pathEditor.selectKeyframe('heroFollow', 0);
+  const path = window.app.ctx.choreo.data.generate.shots.find((s) => s.id === 'heroFollow').path;
+  return { F, before: path.length, camAt: [tl.baked.pos[F * 3], tl.baked.pos[F * 3 + 1], tl.baked.pos[F * 3 + 2]] };
+});
+await page.evaluate(() => window.app.editor.pathEditor._addKeyframe());
+await page.waitForTimeout(600);
+const kfRes = await page.evaluate((camAt) => {
+  const pe = window.app.editor.pathEditor;
+  const path = window.app.ctx.choreo.data.generate.shots.find((s) => s.id === 'heroFollow').path;
+  const a = path[pe.state.keyframe];
+  const ap = Array.isArray(a) ? a : a.p;
+  return {
+    len: path.length,
+    sel: pe.state.phaseId,
+    dist: Math.hypot(ap[0] - camAt[0], ap[1] - camAt[1], ap[2] - camAt[2]),
+  };
+}, kfPre.camAt);
+assert(kfRes.len === kfPre.before + 1, `アンカーが1つ追加 (${kfPre.before} -> ${kfRes.len})`);
+assert(kfRes.sel === 'heroFollow', `playhead のショットが選択された (${kfRes.sel})`);
+assert(kfRes.dist < 0.05, `追加アンカーがシークバー位置(曲線上)に一致 (Δ=${kfRes.dist.toFixed(4)})`);
+
 console.log('--- close (Esc): camera restore + resource release');
 await page.keyboard.press('Escape');
 await page.waitForFunction(() => !window.app.editor.timeline.isOpen);

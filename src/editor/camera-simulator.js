@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import {
   buildCurve,
+  pathBoundaryNeighbors,
   pathTimes,
   samplePathByTime,
   applyLook,
@@ -231,7 +232,20 @@ export function bakeGenerateCamera(gcfg, env) {
 
   /** type:"path"。位置は時刻ベース（samplePathByTime）。通過時刻はアンカーの times[i] で固定 */
   function stepPath(phase, info) {
-    const curve = buildCurveSim(phase);
+    // 隣接 path との境界 C1 連続化（共有点で接線を揃える）
+    const nb = pathBoundaryNeighbors(
+      gcfg.shots,
+      gcfg.shots.indexOf(phase),
+      (s) => (s.relativeTo === 'bottle' ? bottleCenter : new THREE.Vector3())
+    );
+    const curve = buildCurve(
+      phase.path,
+      phase.relativeTo === 'bottle' ? bottleCenter : null,
+      phase.closed === true,
+      state.pos,
+      nb.prev,
+      nb.next
+    );
     const easeFn = gsap.parseEase(phase.ease || 'none');
     const frames = Math.max(1, Math.round(phase.duration * FPS));
     const fovFrom = phase.fov ? phase.fov[0] : null;

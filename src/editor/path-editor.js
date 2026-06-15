@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { buildCurve, kfPos, kfHandle, pathTimes } from '../core/camera-eval.js';
+import { buildCurve, kfPos, kfHandle, pathTimes, pathBoundaryNeighbors } from '../core/camera-eval.js';
 
 const _ndc = new THREE.Vector2();
 
@@ -897,7 +897,16 @@ export class PathEditor {
     }
     const phase = this._currentPhase();
     if (phase.path.length < 2) return;
-    const curve = buildCurve(phase.path, this._offset(), phase.closed === true, this.ctx.world.camera.position);
+    // 隣接 path との境界を C1 連続に表示（本番ベイクと同じ neighbor を使用）
+    const nb = pathBoundaryNeighbors(this._shots(), this._shots().indexOf(phase), (s) => this._shotOffset(s));
+    const curve = buildCurve(
+      phase.path,
+      this._offset(),
+      phase.closed === true,
+      this.ctx.world.camera.position,
+      nb.prev,
+      nb.next
+    );
     const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(160));
     const mat = new THREE.LineBasicMaterial({ color: 0x3070ff, depthTest: false, transparent: true });
     this.line = new THREE.Line(geo, mat);

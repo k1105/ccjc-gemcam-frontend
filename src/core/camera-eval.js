@@ -59,16 +59,20 @@ export function hasManualHandles(path) {
 
 /**
  * パスを曲線として構築。
- * - ハンドルが一切無ければ従来通り CatmullRom（centripetal）。既存JSONはビット完全一致。
- * - ハンドルが1つでもあれば CubicBezierCurve3 を連結した CurvePath。
- *   ハンドルの無いキーフレームは uniform Catmull-Rom 相当の自動接線（±t/3）を与える。
- * @param {Array<[number,number,number]|'@current'|{p,hIn?,hOut?}>} path
+ * - ハンドル無し かつ 境界 neighbor 無し → 従来 CatmullRom（centripetal）。既存JSONはビット一致。
+ * - ハンドル有り or 境界 neighbor 有り → CubicBezierCurve3 連結の CurvePath。
+ *   ハンドル無しキーフレームは uniform Catmull-Rom 相当の自動接線（±t/3）。
+ *   prevWorld/nextWorld を与えると端点の接線をその隣接点で計算し、隣接 path との
+ *   境界を C1 連続（カクつかない）にする。
+ * @param {Array} path
  * @param {THREE.Vector3|null} offset relativeTo 解決済みワールドオフセット（なければ null）
  * @param {boolean} closed 閉路か
  * @param {THREE.Vector3} currentPos "@current" の置換に使う現在カメラ位置
+ * @param {THREE.Vector3|null} prevWorld 先頭アンカーの手前の点（隣接ショットの共有点直前。ワールド）
+ * @param {THREE.Vector3|null} nextWorld 末尾アンカーの次の点（隣接ショットの共有点直後。ワールド）
  */
-export function buildCurve(path, offset, closed, currentPos) {
-  if (!hasManualHandles(path)) {
+export function buildCurve(path, offset, closed, currentPos, prevWorld = null, nextWorld = null) {
+  if (!hasManualHandles(path) && !prevWorld && !nextWorld) {
     const pts = path.map((p) => {
       const v = kfPos(p, currentPos);
       if (offset && p !== '@current') v.add(offset); // '@current' は実位置そのまま
@@ -83,10 +87,18 @@ export function buildCurve(path, offset, closed, currentPos) {
     if (offset && e !== '@current') v.add(offset); // '@current' は実位置そのまま
     return v;
   });
-  // 自動接線（uniform Catmull-Rom）: t_i = (P[i+1]-P[i-1])/2
+  // 自動接線（uniform Catmull-Rom）: t_i = (P[i+1]-P[i-1])/2。
+  // 端点は neighbor（隣接ショットの境界点）があればそれを P[-1]/P[n] として使い C1 連続化。
   const tangent = (i) => {
-    const prev = closed ? P[(i - 1 + n) % n] : P[i - 1] ?? P[i];
-    const next = closed ? P[(i + 1) % n] : P[i + 1] ?? P[i];
+    let prev;
+    let next;
+    if (closed) {
+      prev = P[(i - 1 + n) % n];
+      next = P[(i + 1) % n];
+    } else {
+      prev = i === 0 ? prevWorld ?? P[0] : P[i - 1];
+      next = i === n - 1 ? nextWorld ?? P[n - 1] : P[i + 1];
+    }
     return next.clone().sub(prev).multiplyScalar(0.5);
   };
   const outHandle = (i) => kfHandle(path[i], 'hOut') ?? tangent(i).multiplyScalar(1 / 3);
@@ -103,6 +115,45 @@ export function buildCurve(path, offset, closed, currentPos) {
     cp.add(new THREE.CubicBezierCurve3(p0, p1, p2, p3));
   }
   return cp;
+}
+
+/**
+ * index のショットについて、隣接する path ショットとの境界 C1 連続化に使う
+ * 「共有点の手前/次」のワールド座標を返す（無ければ null）。
+ * 条件: 自身も隣も type:"path" で、境界アンカーの位置がほぼ一致（共有）している事。
+ * @param {Array} shots generate.shots
+ * @param {number} index 対象ショットの添字
+ * @param {(shot:object)=>THREE.Vector3} offsetOf shot の relativeTo ワールドオフセット（zero可）
+ * @returns {{prev: THREE.Vector3|null, next: THREE.Vector3|null}}
+ */
+export function pathBoundaryNeighbors(shots, index, offsetOf) {
+  const res = { prev: null, next: null };
+  const self = shots[index];
+  if (!self || self.type !== 'path' || !Array.isArray(self.path)) return res;
+  const EPS = 0.15;
+  const worldOf = (shot, i) => {
+    const e = shot.path[i];
+    if (!e || e === '@current') return null;
+    return kfPos(e).add(offsetOf(shot));
+  };
+  const selfFirst = worldOf(self, 0);
+  const selfLast = worldOf(self, self.path.length - 1);
+
+  const prevShot = shots[index - 1];
+  if (prevShot?.type === 'path' && Array.isArray(prevShot.path) && prevShot.path.length >= 2 && selfFirst) {
+    const prevLast = worldOf(prevShot, prevShot.path.length - 1);
+    if (prevLast && prevLast.distanceTo(selfFirst) < EPS) {
+      res.prev = worldOf(prevShot, prevShot.path.length - 2); // 共有点の手前
+    }
+  }
+  const nextShot = shots[index + 1];
+  if (nextShot?.type === 'path' && Array.isArray(nextShot.path) && nextShot.path.length >= 2 && selfLast) {
+    const nextFirst = worldOf(nextShot, 0);
+    if (nextFirst && nextFirst.distanceTo(selfLast) < EPS) {
+      res.next = worldOf(nextShot, 1); // 共有点の次
+    }
+  }
+  return res;
 }
 
 /**

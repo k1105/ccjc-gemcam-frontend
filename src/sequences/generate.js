@@ -99,7 +99,8 @@ export class GenerateSequence extends Sequence {
     let result = null;
 
     // shots を順に再生。type:"loop"/"follow" が生成完了待ちのホールド点になる
-    for (const ph of gcfg.shots) {
+    for (let i = 0; i < gcfg.shots.length; i++) {
+      const ph = gcfg.shots[i];
       if (this.bag.disposed) return;
 
       // static は「上に被せる」絶対時刻オーバーレイ。逐次フローには乗せない
@@ -107,7 +108,7 @@ export class GenerateSequence extends Sequence {
       if (ph.type === 'static') continue;
 
       if (ph.type === 'path') {
-        await director.playPhase(ph);
+        await director.playPhase(ph, { shots: gcfg.shots, index: i }); // 隣接 path と境界連続化
         if (this.bag.disposed) return;
         // 写真の後退が終わったら平面→パーティクルへスワップして分解開始
         if (ph.id === 'photoRecede') this._swapToParticles();

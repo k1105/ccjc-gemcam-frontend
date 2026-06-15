@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import {
   buildCurve,
+  pathBoundaryNeighbors,
   pathTimes,
   samplePathByTime,
   applyLook,
@@ -62,8 +63,13 @@ export class CameraDirector {
     this._lookInitialized = true;
   }
 
-  _buildCurve(path, offset, closed = false) {
-    return buildCurve(path, offset, closed, this.camera.position);
+  _buildCurve(path, offset, closed = false, prev = null, next = null) {
+    return buildCurve(path, offset, closed, this.camera.position, prev, next);
+  }
+
+  /** relativeTo を解決したワールドオフセット（無ければ zero）。境界 neighbor 計算用 */
+  _offsetOf(shot) {
+    return this._resolveOffset(shot) ?? new THREE.Vector3();
   }
 
   /** targets Map から注視/オフセット供給元を解決（camera-eval 用） */
@@ -194,11 +200,19 @@ export class CameraDirector {
     });
   }
 
-  /** 一方向パスを再生して完了で resolve */
-  playPhase(phase) {
+  /**
+   * 一方向パスを再生して完了で resolve。
+   * @param {object} phase
+   * @param {{shots?:Array, index?:number}} [ctx] 隣接 path との境界 C1 連続化に使う文脈
+   */
+  playPhase(phase, ctx) {
     if (phase.cut) this._lookInitialized = false; // ハードカット: 向きを開始時 snap
     const offset = this._resolveOffset(phase);
-    const curve = this._buildCurve(phase.path, offset);
+    const nb =
+      ctx?.shots && ctx.index != null
+        ? pathBoundaryNeighbors(ctx.shots, ctx.index, (s) => this._offsetOf(s))
+        : { prev: null, next: null };
+    const curve = this._buildCurve(phase.path, offset, false, nb.prev, nb.next);
     const times = pathTimes(phase); // 各アンカーの正規化時刻（時間と曲線は独立）
     const aimKeys = buildKeyframeAimKeys(phase, times); // 注視点オーバーライド
     const state = { t: 0 };

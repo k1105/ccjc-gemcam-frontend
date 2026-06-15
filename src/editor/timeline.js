@@ -583,73 +583,140 @@ export class Timeline {
     this._seek(next.startFrame);
   }
 
-  /** トラック（フェーズブロック・マーカー・プレイヘッド）を再構築 */
+  /** トラック（全レーンのブロック・マーカー・プレイヘッド）を再構築 */
   _render() {
     if (!this.baked) return;
-    const b = this.baked;
     this.track.innerHTML = '';
-
-    // 2レイヤー: 上=メイン（path/follow/loop）、下=定点（static）。区切り線と行ラベル
-    const divider = document.createElement('div');
-    divider.className = 'tlx-layer-divider';
-    this.track.appendChild(divider);
-    const tag = document.createElement('div');
-    tag.className = 'tlx-layer-tag';
-    tag.textContent = '定点';
-    this.track.appendChild(tag);
-
-    for (const p of b.shots) {
-      const isStatic = p.type === 'static';
-      const layer = isStatic ? 'tlx-layer-static' : 'tlx-layer-main';
-      const block = document.createElement('div');
-      block.className = `tlx-phase tlx-${p.type} ${layer}`;
-      block.dataset.shot = p.id;
-      block.style.left = `${(p.startFrame / b.totalFrames) * 100}%`;
-      block.style.width = `${(p.frameCount / b.totalFrames) * 100}%`;
-      const holdNote = p.type === 'follow' || p.type === 'loop' ? ' (hold)' : '';
-      block.innerHTML = `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`;
-      // 定点ブロック=掴んでドラッグで start 移動。それ以外=クリックで選択＋シーク（ドラッグでスクラブ）
-      block.title = isStatic
-        ? `${p.id} — クリックで選択 / ドラッグで開始位置を移動`
-        : `${p.id} — クリックで選択＋シーク`;
-      this.track.appendChild(block);
-      if (isStatic) this._attachShotDrag(block, p.id);
-      else this._attachBlockSelect(block, p.id);
-
-      for (const m of p.markers ?? []) {
-        const marker = document.createElement('div');
-        marker.className = `tlx-marker ${layer}-mk${m.editable ? '' : ' tlx-marker-ro'}`;
-        marker.dataset.shot = p.id;
-        marker.style.left = `${(m.frame / b.totalFrames) * 100}%`;
-        marker.textContent = '◆';
-        if (isStatic && m.editable) {
-          // 定点マーカーも掴んで左右ドラッグで start を移動（クリックは選択）
-          marker.title = `${p.id} — ドラッグで開始位置を移動`;
-          this._attachShotDrag(marker, p.id);
-          this.track.appendChild(marker);
-          continue;
-        }
-        marker.title = m.editable
-          ? `${p.id} keyframe #${m.kf} — クリックで編集対象に`
-          : `${p.id} #${m.kf} (@current)`;
-        marker.addEventListener('pointerdown', (e) => {
-          e.stopPropagation();
-          this._seek(m.frame);
-          if (!m.editable) return;
-          // 定点ショットはショット選択、path はキーフレーム選択
-          const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === p.id);
-          if (shot?.type === 'static') this.pathEditor.selectShot(p.id);
-          else this.pathEditor.selectKeyframe(p.id, m.kf);
-        });
-        this.track.appendChild(marker);
-      }
-    }
+    // 上から順にレーン（横ストリップ）を描く。現状はカメラの2レーンのみ。
+    // ライト/粒子は今後 _collectLanes() に append するだけで積める。
+    for (const lane of this._collectLanes()) this._renderLane(lane);
 
     this.playhead = document.createElement('div');
     this.playhead.className = 'tlx-playhead';
     this.track.appendChild(this.playhead);
     this._renderPlayhead();
     this._highlightSelectedShot();
+  }
+
+  /**
+   * タイムラインの全レーンを上から順に返す（汎用トラック・モデル）。
+   * 各レーンは clips（ブロック）と markers（◆）と操作（クリック/ドラッグ）を自給する。
+   * laneClass が CSS の縦位置を決める（cam=既存の tlx-layer-static / tlx-layer-main）。
+   * @returns {Array<{laneClass:string, divider?:boolean, tag?:string, clips:Array}>}
+   */
+  _collectLanes() {
+    return this._cameraLanes();
+    // 今後: return [...this._cameraLanes(), ...this._lightLanes(), ...this._particleLanes()];
+  }
+
+  /** カメラトラック: 定点(オーバーレイ=上) / メイン(base=下) の2レーン */
+  _cameraLanes() {
+    const b = this.baked;
+    const total = b.totalFrames;
+    const toClip = (p) => {
+      const isStatic = p.type === 'static';
+      const holdNote = p.type === 'follow' || p.type === 'loop' ? ' (hold)' : '';
+      return {
+        id: p.id,
+        className: `tlx-phase tlx-${p.type}`,
+        leftPct: (p.startFrame / total) * 100,
+        widthPct: (p.frameCount / total) * 100,
+        labelHtml: `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`,
+        // 定点ブロック=掴んでドラッグで start 移動。それ以外=クリックで選択＋シーク
+        title: isStatic
+          ? `${p.id} — クリックで選択 / ドラッグで開始位置を移動`
+          : `${p.id} — クリックで選択＋シーク`,
+        onClip: isStatic
+          ? (el) => this._attachShotDrag(el, p.id)
+          : (el) => this._attachBlockSelect(el, p.id),
+        markers: (p.markers ?? []).map((m) => this._cameraMarkerSpec(p, m, isStatic)),
+      };
+    };
+    return [
+      {
+        laneClass: 'tlx-layer-static',
+        divider: true,
+        tag: '定点',
+        clips: b.shots.filter((p) => p.type === 'static').map(toClip),
+      },
+      {
+        laneClass: 'tlx-layer-main',
+        clips: b.shots.filter((p) => p.type !== 'static').map(toClip),
+      },
+    ];
+  }
+
+  /** カメラの◆マーカー1つ分の spec（クリック=シーク＋選択、定点編集可=ドラッグでstart移動） */
+  _cameraMarkerSpec(p, m, isStatic) {
+    const base = {
+      id: p.id,
+      leftPct: (m.frame / this.baked.totalFrames) * 100,
+      editable: m.editable,
+    };
+    if (isStatic && m.editable) {
+      // 定点マーカーも掴んで左右ドラッグで start を移動（クリックは選択）
+      return { ...base, title: `${p.id} — ドラッグで開始位置を移動`, attachDrag: true };
+    }
+    return {
+      ...base,
+      title: m.editable
+        ? `${p.id} keyframe #${m.kf} — クリックで編集対象に`
+        : `${p.id} #${m.kf} (@current)`,
+      onClick: () => {
+        this._seek(m.frame);
+        if (!m.editable) return;
+        // 定点ショットはショット選択、path はキーフレーム選択
+        const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === p.id);
+        if (shot?.type === 'static') this.pathEditor.selectShot(p.id);
+        else this.pathEditor.selectKeyframe(p.id, m.kf);
+      },
+    };
+  }
+
+  /** 1レーン分（区切り線・行ラベル・clips・markers）を track へ描く */
+  _renderLane(lane) {
+    if (lane.divider) {
+      const divider = document.createElement('div');
+      divider.className = 'tlx-layer-divider';
+      this.track.appendChild(divider);
+    }
+    if (lane.tag) {
+      const tag = document.createElement('div');
+      tag.className = 'tlx-layer-tag';
+      tag.textContent = lane.tag;
+      this.track.appendChild(tag);
+    }
+    for (const clip of lane.clips) {
+      const block = document.createElement('div');
+      block.className = `${clip.className} ${lane.laneClass}`;
+      block.dataset.shot = clip.id;
+      block.style.left = `${clip.leftPct}%`;
+      block.style.width = `${clip.widthPct}%`;
+      block.innerHTML = clip.labelHtml ?? '';
+      if (clip.title) block.title = clip.title;
+      this.track.appendChild(block);
+      clip.onClip?.(block);
+      for (const m of clip.markers ?? []) this._renderMarker(m, lane);
+    }
+  }
+
+  /** ◆マーカー1つを track へ描く（spec の onClick / attachDrag に従う） */
+  _renderMarker(m, lane) {
+    const marker = document.createElement('div');
+    marker.className = `tlx-marker ${lane.laneClass}-mk${m.editable ? '' : ' tlx-marker-ro'}`;
+    marker.dataset.shot = m.id;
+    marker.style.left = `${m.leftPct}%`;
+    marker.textContent = '◆';
+    if (m.title) marker.title = m.title;
+    if (m.attachDrag) {
+      this._attachShotDrag(marker, m.id);
+    } else if (m.onClick) {
+      marker.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        m.onClick();
+      });
+    }
+    this.track.appendChild(marker);
   }
 
   /** 選択中ショット（pathEditor.state.phaseId）のブロックを枠でハイライト */

@@ -38,7 +38,8 @@ const LIGHT_COLOR = 0xffcc33; // ライト配置マーカー（アンバー）
 export class PathEditor {
   constructor(ctx, parentGui) {
     this.ctx = ctx;
-    this.gui = parentGui.addFolder('Camera Path (generate)');
+    this.gui = parentGui.addFolder('Camera Path (generate)'); // カメラタブの親（preview/Shots/Selected shot）
+    this.lightsGui = parentGui.addFolder('Lights'); // ライトタブの親（配置/Selected light）
     this.active = false;
     this.onChanged = null;
 
@@ -115,7 +116,7 @@ export class PathEditor {
     this.kfFolder = this.gui.addFolder('Selected shot');
 
     // 配置ライト（generate.lights）: 種別を選んで追加、ビューポートで位置 gizmo 編集
-    this.lightsFolder = this.gui.addFolder('Lights（配置）');
+    this.lightsFolder = this.lightsGui.addFolder('Lights（配置）');
     const lacts = {
       addPoint: () => this._addLight('point'),
       addSpot: () => this._addLight('spot'),
@@ -126,7 +127,7 @@ export class PathEditor {
     this.lightsFolder.add(lacts, 'addSpot').name('＋ spot');
     this.lightsFolder.add(lacts, 'addDir').name('＋ directional');
     this.lightsFolder.add(lacts, 'remove').name('🗑 ライト削除');
-    this.lightFolder = this.gui.addFolder('Selected light');
+    this.lightFolder = this.lightsGui.addFolder('Selected light');
 
     this.rebuild();
   }
@@ -1006,7 +1007,7 @@ export class PathEditor {
   /** 選択ライトの編集パネル（種別/色/強度/位置/距離/コーン/target） */
   _buildLightPanel() {
     this.lightFolder.destroy();
-    this.lightFolder = this.gui.addFolder('Selected light');
+    this.lightFolder = this.lightsGui.addFolder('Selected light');
     this.lightPanel = null;
     const lt = this._currentLight();
     if (!lt) return;

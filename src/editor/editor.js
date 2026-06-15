@@ -53,7 +53,7 @@ export class Editor {
       this.timeline.invalidate();
       touch();
     };
-    this.gui
+    this._timelineCtrl = this.gui
       .add({ open: () => this.timeline.toggle() }, 'open')
       .name('🎬 Timeline（フレーム単位プレビュー）');
 
@@ -66,8 +66,7 @@ export class Editor {
     const tune = this.gui.addFolder('Parameters');
     buildGuiFromObject(tune.addFolder('select'), choreo.data.select, { onChange: onTuned });
     buildGuiFromObject(tune.addFolder('shoot'), choreo.data.shoot, { onChange: touch });
-    // generate: カメラ編成に効く値はタイムラインへ通知。particles はシェーダ
-    // uniform に焼かれるため scene:true（プレビューの粒を再構築）
+    // generate: カメラ編成に効く値はタイムラインへ通知（particles は別タブへ）
     const gen = tune.addFolder('generate');
     buildGuiFromObject(gen, choreo.data.generate, {
       skipKeys: ['path', 'particles', 'times', 'lights'], // パス/時刻/ライトは PathEditor で編集
@@ -76,14 +75,71 @@ export class Editor {
         touch();
       },
     });
-    buildGuiFromObject(gen.addFolder('particles'), choreo.data.generate.particles, {
+    buildGuiFromObject(tune.addFolder('result'), choreo.data.result, { onChange: touch });
+    tune.folders.forEach((f) => f.close());
+
+    // particles は専用タブ（独立トップレベル）。シェーダ uniform に焼かれるため
+    // scene:true でプレビューの粒を再構築する
+    const particlesFolder = this.gui.addFolder('particles');
+    buildGuiFromObject(particlesFolder, choreo.data.generate.particles, {
       onChange: () => {
         this.timeline.invalidate({ scene: true });
         touch();
       },
     });
-    buildGuiFromObject(tune.addFolder('result'), choreo.data.result, { onChange: touch });
-    tune.folders.forEach((f) => f.close());
+
+    // --- タブ化（同時に操作しないものを4タブへ。Config IO/Timeline は常時表示） ---
+    this._setupTabs({
+      Camera: this.pathEditor.gui,
+      Lights: this.pathEditor.lightsGui,
+      Particles: particlesFolder,
+      Scene: tune,
+    });
+  }
+
+  /**
+   * トップレベルのフォルダ群をタブで出し分ける。lil-gui にタブは無いので、
+   * タブバーを自作し、選択タブの中身フォルダだけ表示する（残りは display:none）。
+   * 各タブの中身は常に開いた状態にし、冗長なフォルダ見出しは隠す。
+   */
+  _setupTabs(map) {
+    injectTabStyles();
+    this._tabFolders = map;
+    const names = Object.keys(map);
+
+    for (const f of Object.values(map)) {
+      f.open();
+      f.$title.style.display = 'none';
+    }
+
+    const bar = document.createElement('div');
+    bar.className = 'editor-tabbar';
+    this._tabButtons = {};
+    for (const name of names) {
+      const btn = document.createElement('button');
+      btn.className = 'editor-tab';
+      btn.textContent = name;
+      btn.addEventListener('click', () => this._selectTab(name));
+      bar.appendChild(btn);
+      this._tabButtons[name] = btn;
+    }
+
+    // DOM 並び: Config IO / 🎬 Timeline / タブバー / 各タブ中身
+    const c = this.gui.$children;
+    c.appendChild(this._timelineCtrl.domElement);
+    c.appendChild(bar);
+    for (const name of names) c.appendChild(map[name].domElement);
+
+    // 直前のタブを rebuild をまたいで復元。無ければ先頭タブ
+    this._selectTab(this._activeTab && map[this._activeTab] ? this._activeTab : names[0]);
+  }
+
+  _selectTab(name) {
+    this._activeTab = name;
+    for (const [n, f] of Object.entries(this._tabFolders)) {
+      f.domElement.style.display = n === name ? '' : 'none';
+      this._tabButtons[n].classList.toggle('active', n === name);
+    }
   }
 
   /** import 後などの全再構築 */
@@ -216,6 +272,29 @@ function applySnapshot(target, src) {
       target[k] = structuredClone(sv);
     }
   }
+}
+
+/** タブバーのスタイルを一度だけ注入 */
+function injectTabStyles() {
+  if (document.getElementById('ccjc-editor-tab-style')) return;
+  const style = document.createElement('style');
+  style.id = 'ccjc-editor-tab-style';
+  style.textContent = `
+.editor-tabbar {
+  display: flex; gap: 2px; margin: 6px 0 4px;
+}
+.editor-tab {
+  flex: 1; padding: 5px 4px;
+  background: #1b1b1f; color: #aaa;
+  border: 1px solid #3a3a44; border-radius: 5px;
+  font: 11px/1.2 'SF Mono', Menlo, Consolas, monospace; cursor: pointer;
+}
+.editor-tab:hover { color: #e8e8ee; border-color: #555; }
+.editor-tab.active {
+  background: #2c6cff; color: #fff; border-color: #2c6cff;
+}
+`;
+  document.head.appendChild(style);
 }
 
 /** 値の大きさからスライダーレンジを推定 */

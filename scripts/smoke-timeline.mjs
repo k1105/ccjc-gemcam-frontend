@@ -180,6 +180,31 @@ assert(afterAdd.count === beforeShots + 1, `static ショット追加 (${beforeS
 assert(afterAdd.hasStaticBake, 'static ショットがベイクに反映');
 assert(afterAdd.newIdx === phShot.index + 1, `プレイヘッド(${phShot.id})直後に挿入 (index ${afterAdd.newIdx})`);
 assert(afterAdd.overridden, `オーバーレイが開始フレーム(${afterAdd.startFrame})で base を上書き`);
+
+console.log('--- drag static block to retime (start) ---');
+const startBefore = await page.evaluate(
+  () => window.app.ctx.choreo.data.generate.shots.find((s) => s.type === 'static').start
+);
+const box = await page.$eval('.tlx-phase.tlx-static', (el) => {
+  const r = el.getBoundingClientRect();
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+});
+await page.mouse.move(box.x, box.y);
+await page.mouse.down();
+await page.mouse.move(box.x - 60, box.y, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(600);
+const dragRes = await page.evaluate(() => {
+  const s = window.app.ctx.choreo.data.generate.shots.find((x) => x.type === 'static');
+  const ov = window.app.editor.timeline.baked.shots.find((x) => x.type === 'static');
+  return { start: s.start, sf: ov?.startFrame };
+});
+assert(dragRes.start < startBefore, `ドラッグで start が左へ移動 (${startBefore} -> ${dragRes.start})`);
+assert(
+  Math.abs(dragRes.sf - Math.round(dragRes.start * 60)) <= 1,
+  `ベイクのオーバーレイ開始フレームが追従 (${dragRes.sf})`
+);
+
 await page.evaluate(() => window.app.editor.pathEditor._removeShot());
 await page.waitForTimeout(500);
 const afterRemove = await page.evaluate(() => window.app.ctx.choreo.data.generate.shots.length);

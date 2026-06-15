@@ -502,7 +502,10 @@ export class PathEditor {
     if (typeof shot.start !== 'number') shot.start = 0;
     const tF = this.kfFolder.addFolder('③ timing / fov');
     tF.add(shot, 'start', 0, 60, 0.05).name('start（開始秒・被せ位置）').onChange(() => this.onChanged?.());
-    tF.add(shot, 'duration', 0.1, 15, 0.1).name('duration（秒）').onChange(() => this.onChanged?.());
+    // duration: スライダーは 5s 上限、数値入力は上限なしで自由に
+    const durC = tF.add(shot, 'duration', 0.1, 5, 0.1).name('duration（秒・slider上限5s）');
+    durC.onChange(() => this.onChanged?.());
+    durC._clamp = (v) => (v < 0.1 ? 0.1 : v); // lil-gui 0.21: 上限クランプを外す（slider/drag は _max=5 のまま）
     if (Array.isArray(shot.fov)) {
       tF.add(shot.fov, 0, 10, 120, 1).name('fov 開始').onChange(() => this.onChanged?.());
       tF.add(shot.fov, 1, 10, 120, 1).name('fov 終了').onChange(() => this.onChanged?.());

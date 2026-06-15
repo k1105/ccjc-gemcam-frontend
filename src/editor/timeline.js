@@ -598,18 +598,29 @@ export class Timeline {
       const layer = isStatic ? 'tlx-layer-static' : 'tlx-layer-main';
       const block = document.createElement('div');
       block.className = `tlx-phase tlx-${p.type} ${layer}`;
+      block.dataset.shot = p.id;
       block.style.left = `${(p.startFrame / b.totalFrames) * 100}%`;
       block.style.width = `${(p.frameCount / b.totalFrames) * 100}%`;
       const holdNote = p.type === 'follow' || p.type === 'loop' ? ' (hold)' : '';
       block.innerHTML = `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`;
-      block.title = `${p.id} — クリックでシーク`;
+      // 定点ブロックは掴んで左右ドラッグで start（被せ位置）を移動
+      block.title = isStatic ? `${p.id} — ドラッグで開始位置を移動` : `${p.id} — クリックでシーク`;
       this.track.appendChild(block);
+      if (isStatic) this._attachShotDrag(block, p.id);
 
       for (const m of p.markers ?? []) {
         const marker = document.createElement('div');
         marker.className = `tlx-marker ${layer}-mk${m.editable ? '' : ' tlx-marker-ro'}`;
+        marker.dataset.shot = p.id;
         marker.style.left = `${(m.frame / b.totalFrames) * 100}%`;
         marker.textContent = '◆';
+        if (isStatic && m.editable) {
+          // 定点マーカーも掴んで左右ドラッグで start を移動（クリックは選択）
+          marker.title = `${p.id} — ドラッグで開始位置を移動`;
+          this._attachShotDrag(marker, p.id);
+          this.track.appendChild(marker);
+          continue;
+        }
         marker.title = m.editable
           ? `${p.id} keyframe #${m.kf} — クリックで編集対象に`
           : `${p.id} #${m.kf} (@current)`;
@@ -630,6 +641,69 @@ export class Timeline {
     this.playhead.className = 'tlx-playhead';
     this.track.appendChild(this.playhead);
     this._renderPlayhead();
+  }
+
+  /**
+   * 定点(static)オーバーレイをタイムラインで掴んで左右ドラッグ → start（被せ開始秒）を移動。
+   * ドラッグ中は DOM 位置だけ動かし、離した時に1回だけリベイク（onChanged）する。
+   * 動かさなければクリック扱い＝シーク＆選択。
+   */
+  _attachShotDrag(el, shotId) {
+    el.style.pointerEvents = 'auto';
+    el.style.cursor = 'ew-resize';
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!this.baked) return;
+      const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === shotId);
+      if (!shot) return;
+      const rect = this.track.getBoundingClientRect();
+      const total = this.baked.totalFrames;
+      const startX = e.clientX;
+      const startStart = shot.start ?? 0;
+      const maxStart = Math.max(0, (total - 1) / FPS);
+      let moved = false;
+      el.setPointerCapture(e.pointerId);
+
+      const move = (ev) => {
+        if (Math.abs(ev.clientX - startX) > 3) moved = true;
+        const dFrames = ((ev.clientX - startX) / rect.width) * total;
+        let ns = startStart + dFrames / FPS;
+        ns = Math.max(0, Math.min(ns, maxStart));
+        ns = Math.round(ns * FPS) / FPS; // フレーム量子化
+        shot.start = Number(ns.toFixed(3));
+        this._repositionStatic(shotId);
+        this.readout.textContent = `${shot.id}  start ${ns.toFixed(2)}s（ドラッグ中）`;
+      };
+      const up = (ev) => {
+        el.releasePointerCapture(ev.pointerId);
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        this.pathEditor.selectShot(shotId);
+        if (moved) {
+          this.pathEditor.onChanged?.(); // リベイク＋undo（移動確定）
+        } else {
+          this._seek(Math.round((shot.start ?? 0) * FPS)); // クリック＝先頭へシーク
+        }
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    });
+  }
+
+  /** ドラッグ中の定点ブロック/マーカーの left/width だけ更新（リベイクしない） */
+  _repositionStatic(shotId) {
+    const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === shotId);
+    if (!shot || !this.baked) return;
+    const total = this.baked.totalFrames;
+    const leftPct = (((shot.start ?? 0) * FPS) / total) * 100;
+    const block = this.track.querySelector(`.tlx-phase[data-shot="${shotId}"]`);
+    if (block) {
+      block.style.left = `${leftPct}%`;
+      block.style.width = `${(((shot.duration ?? 1) * FPS) / total) * 100}%`;
+    }
+    const mk = this.track.querySelector(`.tlx-marker[data-shot="${shotId}"]`);
+    if (mk) mk.style.left = `${leftPct}%`;
   }
 
   _renderPlayhead() {

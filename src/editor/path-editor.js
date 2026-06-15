@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import gsap from 'gsap';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { buildCurve, kfPos, kfHandle } from '../core/camera-eval.js';
+import { buildCurve, kfPos, kfHandle, pathTimes } from '../core/camera-eval.js';
 
 const _ndc = new THREE.Vector2();
 
@@ -117,6 +118,15 @@ export class PathEditor {
   _currentPhase() {
     const s = this._currentShot();
     return s && Array.isArray(s.path) ? s : undefined;
+  }
+
+  /** path ショットの times（各アンカーの正規化時刻）配列を保証して返す（path と同インデックス） */
+  _ensureTimes(shot) {
+    const n = shot.path.length;
+    if (!Array.isArray(shot.times) || shot.times.length !== n) {
+      shot.times = pathTimes(shot); // 無ければ uniform で生成
+    }
+    return shot.times;
   }
 
   /** ショットの relativeTo を解決したワールドオフセット */
@@ -263,6 +273,18 @@ export class PathEditor {
       this.kfFolder.add({ info: '実行時カメラ位置（編集不可）' }, 'info').name('type').disable();
       return;
     }
+
+    // 時刻（このアンカーに到達する正規化時刻 0–1。曲線編集とは独立）
+    const times = this._ensureTimes(phase);
+    const tProxy = { t: times[i] ?? 0 };
+    this.kfFolder
+      .add(tProxy, 't', 0, 1, 0.001)
+      .name('t（到達時刻 0–1）')
+      .onChange((v) => {
+        times[i] = Number(v.toFixed(4));
+        this._rebuildLine();
+        this.onChanged?.();
+      });
 
     // ① position（アンカー）
     const posF = this.kfFolder.addFolder('① position（位置）');
@@ -1281,7 +1303,17 @@ export class PathEditor {
     ).sub(off);
     const anchor = [Number(local.x.toFixed(3)), Number(local.y.toFixed(3)), Number(local.z.toFixed(3))];
 
+    // 到達時刻 t = シークバー位置の eased 進行（前後アンカーの t の間にクランプ）
+    const times = this._ensureTimes(shot);
+    const easeFn = gsap.parseEase(shot.ease || 'none');
+    const linP = info.frameCount > 0 ? (F - info.startFrame) / info.frameCount : 0;
+    const tPrev = times[prevKf] ?? 0;
+    const tNext = times[prevKf + 1] ?? 1;
+    let t = easeFn(Math.max(0, Math.min(linP, 1)));
+    t = Math.max(tPrev + 1e-4, Math.min(t, tNext - 1e-4));
+
     shot.path.splice(prevKf + 1, 0, anchor);
+    times.splice(prevKf + 1, 0, Number(t.toFixed(4)));
     this.state.phaseId = shot.id; // playhead のショットを選択対象に
     this.state.keyframe = prevKf + 1;
     this.sel = { kind: 'anchor', side: null };
@@ -1299,7 +1331,10 @@ export class PathEditor {
     const dup = nextEntry
       ? cur.clone().lerp(this._localPos(nextEntry), 0.5)
       : cur.clone().add(new THREE.Vector3(0.3, 0, 0));
+    const times = this._ensureTimes(phase);
+    const tMid = nextEntry ? ((times[i] ?? 0) + (times[i + 1] ?? 1)) / 2 : Math.min(1, (times[i] ?? 0) + 0.1);
     phase.path.splice(i + 1, 0, [dup.x, dup.y, dup.z].map((v) => Number(v.toFixed(3))));
+    times.splice(i + 1, 0, Number(tMid.toFixed(4)));
     this.state.keyframe = i + 1;
     this.sel = { kind: 'anchor', side: null };
     this.rebuild();
@@ -1314,6 +1349,7 @@ export class PathEditor {
     const i = this.state.keyframe;
     if (phase.path[i] === '@current') return;
     phase.path.splice(i, 1);
+    if (Array.isArray(phase.times) && phase.times.length > i) phase.times.splice(i, 1);
     this.state.keyframe = Math.max(0, i - 1);
     this.sel = { kind: 'anchor', side: null };
     this.rebuild();

@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import {
   buildCurve,
-  samplePath,
+  pathTimes,
+  samplePathByTime,
   applyLook,
   isKeyedOrientation,
   hasFreeOrientation,
@@ -10,7 +11,6 @@ import {
   sampleOrientationQuat,
   smoothToPoint,
   smoothQuat,
-  controlPointArcFractions,
   buildKeyframeAimKeys,
   FollowEvaluator,
   LoopEvaluator,
@@ -229,7 +229,7 @@ export function bakeGenerateCamera(gcfg, env) {
 
   // ---- phase steppers（director の各 tick の固定ステップ版） ----
 
-  /** type:"path"。camera-eval.samplePath で位置/fov、applyLook で注視点を評価 */
+  /** type:"path"。位置は時刻ベース（samplePathByTime）。通過時刻はアンカーの times[i] で固定 */
   function stepPath(phase, info) {
     const curve = buildCurveSim(phase);
     const easeFn = gsap.parseEase(phase.ease || 'none');
@@ -237,10 +237,10 @@ export function bakeGenerateCamera(gcfg, env) {
     const fovFrom = phase.fov ? phase.fov[0] : null;
     const fovTo = phase.fov ? phase.fov[1] : null;
 
-    // キーフレーム通過位置マーカー（弧長割合 → ease 逆引き）
-    const us = controlPointArcFractions(curve);
-    const aimKeys = buildKeyframeAimKeys(phase, us); // 注視点オーバーライド（無ければ null）
-    const pending = us.map((u, kf) => ({
+    // 各アンカーの正規化時刻（曲線編集に依存しない）。マーカー＝eased進行が times[i] に達した瞬間
+    const times = pathTimes(phase);
+    const aimKeys = buildKeyframeAimKeys(phase, times); // 注視点オーバーライド（無ければ null）
+    const pending = times.map((u, kf) => ({
       u,
       kf,
       editable: phase.path[kf] !== '@current',
@@ -248,11 +248,10 @@ export function bakeGenerateCamera(gcfg, env) {
     }));
 
     for (let f = 1; f <= frames; f++) {
-      const t = easeFn(Math.min((f * DT) / phase.duration, 1));
+      const t = easeFn(Math.min((f * DT) / phase.duration, 1)); // eased 進行
       const uLin = Math.min((f * DT) / phase.duration, 1); // 線形進行（lookAt.keys用）
-      const fov = samplePath(curve, t, fovFrom, fovTo, state.pos);
-      if (fov !== null) state.fov = fov;
-      // posParam=t（eased進行＝getPointAt の引数）で注視点オーバーライドを補間
+      samplePathByTime(curve, times, t, state.pos);
+      if (fovFrom !== null) state.fov = fovFrom + (fovTo - fovFrom) * t;
       const freeQ = applyOrientationSim(phase.lookAt, aimKeys, uLin, Math.min(t, 1), DT);
       state.time += DT;
       record(freeQ);

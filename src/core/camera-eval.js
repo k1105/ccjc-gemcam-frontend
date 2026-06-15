@@ -115,6 +115,48 @@ export function samplePath(curve, easedT, fovFrom, fovTo, outPos) {
 }
 
 /**
+ * パスの「キーフレーム正規化時刻」配列を返す（path と同インデックス）。
+ * - shot.times があり長さが一致すればそれを使う（時間と曲線は独立）
+ * - 無ければ uniform（i/(n-1)）にフォールバック
+ * これにより「各アンカーは times[i] の瞬間に必ずその点に居る／曲線編集で時刻は不変」になる。
+ */
+export function pathTimes(shot) {
+  const n = shot.path.length;
+  const t = shot.times;
+  if (Array.isArray(t) && t.length === n) return t;
+  return shot.path.map((_, i) => (n > 1 ? i / (n - 1) : 0));
+}
+
+/** 区間 i を局所係数 f(0..1) で評価（CurvePath=区間ベジェ / CatmullRomCurve3=自然パラメータ） */
+function evalSegment(curve, i, f, n, out) {
+  if (Array.isArray(curve.curves)) {
+    const seg = curve.curves[Math.max(0, Math.min(i, curve.curves.length - 1))];
+    return seg.getPoint(f, out);
+  }
+  if (n < 2) return curve.getPoint(0, out);
+  return curve.getPoint((i + f) / (n - 1), out);
+}
+
+/**
+ * 時刻ベースのパス位置評価。各アンカーの正規化時刻 times[i] の瞬間にその点へ居り、
+ * 区間内は曲線形状で空間補間する（＝通過時刻は曲線編集に依存しない＝完全独立）。
+ * @param {THREE.Curve} curve buildCurve の結果（CatmullRomCurve3 / CurvePath）
+ * @param {number[]} times 各アンカーの正規化時刻（昇順前提）
+ * @param {number} p eased 進行度（0..1）
+ */
+export function samplePathByTime(curve, times, p, out) {
+  const n = times.length;
+  if (n <= 1) return evalSegment(curve, 0, 0, n, out);
+  if (p <= times[0]) return evalSegment(curve, 0, 0, n, out);
+  if (p >= times[n - 1]) return evalSegment(curve, n - 2, 1, n, out);
+  let i = 0;
+  for (; i < n - 1; i++) if (p >= times[i] && p <= times[i + 1]) break;
+  const span = times[i + 1] - times[i];
+  const f = span > 1e-6 ? (p - times[i]) / span : 0;
+  return evalSegment(curve, i, f, n, out);
+}
+
+/**
  * lookAt の注視点平滑化。lookCurrent を target へ指数平滑で寄せる（mutate）。
  * @param {object|undefined} lookCfg { mode:'fixed'|'target', point?, target?, lerp? }
  * @param {(name:string, out:THREE.Vector3)=>THREE.Vector3|null} resolveTarget

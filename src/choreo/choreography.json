@@ -48,6 +48,7 @@
         "duration": 3.0,
         "ease": "power2.inOut",
         "path": [[0, 0.5, 2.2], [0, 0.62, 3.6], [0.5, 0.85, 5.2]],
+        "times": [0, 0.4537, 1],
         "lookAt": { "mode": "fixed", "point": [0, 0.5, 0] },
         "fov": [45, 50]
       },
@@ -57,6 +58,7 @@
         "duration": 5.6,
         "ease": "none",
         "path": [[0.5, 0.85, 5.2], [3.2, 1.6, 2.2], [6.5, 1.2, -1.5], [8.7, 0.9, -3.9]],
+        "times": [0, 0.3327, 0.7352, 1],
         "lookAt": { "mode": "target", "target": "heroParticle", "lerp": 0.085 }
       },
       {
@@ -81,6 +83,7 @@
         "ease": "power3.inOut",
         "relativeTo": "bottle",
         "path": ["@current", [0, 0.25, 2.0], [0, 0.1, 3.0]],
+        "times": [0, 0.5, 1],
         "lookAt": { "mode": "target", "target": "bottle", "lerp": 0.12 },
         "fov": [50, 45],
         "endFlash": true

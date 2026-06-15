@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import {
   buildCurve,
-  samplePath,
+  pathTimes,
+  samplePathByTime,
   applyLook,
   isKeyedOrientation,
   hasFreeOrientation,
@@ -10,7 +11,6 @@ import {
   sampleOrientationQuat,
   smoothToPoint,
   smoothQuat,
-  controlPointArcFractions,
   buildKeyframeAimKeys,
   FollowEvaluator,
   LoopEvaluator,
@@ -199,7 +199,8 @@ export class CameraDirector {
     if (phase.cut) this._lookInitialized = false; // ハードカット: 向きを開始時 snap
     const offset = this._resolveOffset(phase);
     const curve = this._buildCurve(phase.path, offset);
-    const aimKeys = buildKeyframeAimKeys(phase, controlPointArcFractions(curve)); // 注視点オーバーライド
+    const times = pathTimes(phase); // 各アンカーの正規化時刻（時間と曲線は独立）
+    const aimKeys = buildKeyframeAimKeys(phase, times); // 注視点オーバーライド
     const state = { t: 0 };
     const fovFrom = phase.fov ? phase.fov[0] : null;
     const fovTo = phase.fov ? phase.fov[1] : null;
@@ -207,15 +208,15 @@ export class CameraDirector {
 
     return new Promise((resolve) => {
       const tick = (dt) => {
-        // state.t は gsap tween が ease 適用済みで駆動する eased 進行度
-        const fov = samplePath(curve, state.t, fovFrom, fovTo, _pos);
+        // state.t は gsap tween が ease 適用済みで駆動する eased 進行度。
+        // 位置は時刻ベースで評価（アンカー times[i] の瞬間にその点。曲線編集で時刻不変）。
+        samplePathByTime(curve, times, state.t, _pos);
         this.camera.position.copy(_pos);
-        if (fov !== null) {
-          this.camera.fov = fov;
+        if (fovFrom !== null) {
+          this.camera.fov = fovFrom + (fovTo - fovFrom) * state.t;
           this.camera.updateProjectionMatrix();
         }
         elapsed += dt;
-        // posParam=state.t（eased＝getPointAt の引数）でキーフレーム注視点を補間
         this._applyOrientation(phase.lookAt, aimKeys, Math.min(elapsed / phase.duration, 1), state.t, dt);
       };
       this.world.addTickable(tick);

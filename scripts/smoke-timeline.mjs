@@ -205,6 +205,20 @@ assert(
   `ベイクのオーバーレイ開始フレームが追従 (${dragRes.sf})`
 );
 
+console.log('--- static pan (注視点キーフレーム) ---');
+await page.evaluate(() => window.app.editor.pathEditor._setStaticLookMode('keyframe'));
+await page.waitForTimeout(600);
+const pan = await page.evaluate(() => {
+  const s = window.app.ctx.choreo.data.generate.shots.find((x) => x.type === 'static');
+  const b = window.app.editor.timeline.baked;
+  const ov = b.shots.find((x) => x.type === 'static');
+  const sf = ov.startFrame;
+  const ef = ov.startFrame + ov.frameCount - 1;
+  return { keys: s.lookAt.keys?.length, lookStartX: b.look[sf * 3], lookEndX: b.look[ef * 3] };
+});
+assert(pan.keys === 2, `注視点キーフレーム2点生成 (${pan.keys})`);
+assert(Math.abs(pan.lookEndX - pan.lookStartX) > 0.5, `パンで注視点xが時間変化 (${(+pan.lookStartX).toFixed(2)} -> ${(+pan.lookEndX).toFixed(2)})`);
+
 await page.evaluate(() => window.app.editor.pathEditor._removeShot());
 await page.waitForTimeout(500);
 const afterRemove = await page.evaluate(() => window.app.ctx.choreo.data.generate.shots.length);

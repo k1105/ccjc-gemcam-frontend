@@ -44,6 +44,7 @@ export class PathEditor {
     this.state = {
       phaseId: this._shots()[0]?.id ?? '', // 選択中ショット。タイムライン◆/管理ボタンで切替
       keyframe: 0,
+      aimKey: 0, // 定点のパン（注視点キーフレーム）の編集対象index
       preview: () => this._preview(),
       addKeyframe: () => this._addKeyframe(),
       removeKeyframe: () => this._removeKeyframe(),
@@ -63,6 +64,8 @@ export class PathEditor {
     this.staticPosSphere = null; // 定点位置マーカー（橙）
     this.staticLookSphere = null; // 定点の注視点（緑、fixed のみ）
     this.staticLookLine = null;
+    this.staticAimSpheres = []; // 定点パン（注視点キーフレーム）の各点（緑、選択は黄）
+    this.staticAimLine = null; // 注視点キーフレームを結ぶパン軌跡線
     this.staticPanel = null;
 
     this.tc = new TransformControls(ctx.world.camera, ctx.world.renderer.domElement);
@@ -262,6 +265,10 @@ export class PathEditor {
       .name('keyframe')
       .disable();
 
+    // キーフレームの追加 / 削除（選択中の path ショットに対して）
+    this.kfFolder.add(this.state, 'addKeyframe').name('＋ keyframe（選択の直後に挿入）');
+    this.kfFolder.add(this.state, 'removeKeyframe').name('− keyframe（選択を削除）');
+
     if (entry === '@current') {
       this.kfFolder.add({ info: '実行時カメラ位置（編集不可）' }, 'info').name('type').disable();
       return;
@@ -349,7 +356,13 @@ export class PathEditor {
   }
 
   _disposeStatic() {
-    for (const k of ['staticPosSphere', 'staticLookSphere', 'staticLookLine']) {
+    for (const s of this.staticAimSpheres) {
+      this.viz.remove(s);
+      s.geometry.dispose();
+      s.material.dispose();
+    }
+    this.staticAimSpheres = [];
+    for (const k of ['staticPosSphere', 'staticLookSphere', 'staticLookLine', 'staticAimLine']) {
       const o = this[k];
       if (!o) continue;
       this.viz.remove(o);
@@ -382,25 +395,67 @@ export class PathEditor {
       this.viz.add(this.staticPosSphere);
     }
 
-    const lp = this._staticLookPoint(shot);
-    const draggableLook = Array.isArray(shot.lookAt?.point); // fixed のみドラッグ可
-    if (lp && draggableLook) {
-      this.staticLookSphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.05, 12, 10),
-        new THREE.MeshBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true })
-      );
-      this.staticLookSphere.renderOrder = 1000;
-      this.staticLookSphere.position.copy(lp);
-      this.staticLookSphere.userData = { kind: 'static-look' };
-      this.viz.add(this.staticLookSphere);
-    }
-    if (lp && posW) {
-      this.staticLookLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([posW.clone(), lp.clone()]),
-        new THREE.LineBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true, opacity: 0.6 })
-      );
-      this.staticLookLine.renderOrder = 997;
-      this.viz.add(this.staticLookLine);
+    const lc = shot.lookAt;
+    if (Array.isArray(lc?.keys) && lc.keys.length) {
+      // パン（注視点キーフレーム）: 各キー点を緑球（選択中は黄）、t 順に線で連結
+      this.state.aimKey = Math.min(this.state.aimKey ?? 0, lc.keys.length - 1);
+      const pts = [];
+      lc.keys.forEach((k, idx) => {
+        if (!Array.isArray(k.point)) return;
+        const pt = new THREE.Vector3(...k.point);
+        pts.push(pt);
+        const sel = idx === this.state.aimKey;
+        const s = new THREE.Mesh(
+          new THREE.SphereGeometry(sel ? 0.06 : 0.045, 12, 10),
+          new THREE.MeshBasicMaterial({ color: sel ? SELECTED_COLOR : AIM_COLOR, depthTest: false, transparent: true })
+        );
+        s.renderOrder = 1000;
+        s.position.copy(pt);
+        s.userData = { kind: 'static-aimkey', index: idx };
+        this.viz.add(s);
+        this.staticAimSpheres.push(s);
+      });
+      if (pts.length >= 2) {
+        this.staticAimLine = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true, opacity: 0.5 })
+        );
+        this.staticAimLine.renderOrder = 997;
+        this.viz.add(this.staticAimLine);
+      }
+      // 定点位置 → 選択中の注視点キー の線
+      const selSphere = this.staticAimSpheres[this.state.aimKey];
+      if (posW && selSphere) {
+        this.staticLookLine = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([posW.clone(), selSphere.position.clone()]),
+          new THREE.LineBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true, opacity: 0.35 })
+        );
+        this.staticLookLine.renderOrder = 996;
+        this.viz.add(this.staticLookLine);
+      }
+      if (this.sel.kind !== 'static-pos') this.sel = { kind: 'static-aimkey', side: null };
+    } else {
+      // fixed（単一注視点・ドラッグ可）/ target（追従・表示のみ）
+      const lp = this._staticLookPoint(shot);
+      const draggableLook = Array.isArray(lc?.point);
+      if (lp && draggableLook) {
+        this.staticLookSphere = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 12, 10),
+          new THREE.MeshBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true })
+        );
+        this.staticLookSphere.renderOrder = 1000;
+        this.staticLookSphere.position.copy(lp);
+        this.staticLookSphere.userData = { kind: 'static-look' };
+        this.viz.add(this.staticLookSphere);
+      }
+      if (lp && posW) {
+        this.staticLookLine = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([posW.clone(), lp.clone()]),
+          new THREE.LineBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true, opacity: 0.6 })
+        );
+        this.staticLookLine.renderOrder = 997;
+        this.viz.add(this.staticLookLine);
+      }
     }
 
     this._attachStaticGizmo();
@@ -408,10 +463,11 @@ export class PathEditor {
 
   _attachStaticGizmo() {
     let obj = null;
-    if (this.sel.kind === 'static-look') obj = this.staticLookSphere;
+    if (this.sel.kind === 'static-aimkey') obj = this.staticAimSpheres[this.state.aimKey];
+    else if (this.sel.kind === 'static-look') obj = this.staticLookSphere;
     if (!obj) {
       this.sel = { kind: 'static-pos', side: null };
-      obj = this.staticPosSphere ?? this.staticLookSphere;
+      obj = this.staticPosSphere ?? this.staticLookSphere ?? this.staticAimSpheres[this.state.aimKey];
     }
     if (obj && this.active) {
       this.tc.attach(obj);
@@ -422,14 +478,22 @@ export class PathEditor {
     }
   }
 
-  /** static の look 線だけ更新（球は dispose しない） */
+  /** static の補助線（pos→注視点 / パン軌跡）だけ更新（球は dispose しない） */
   _redrawStaticLine() {
-    if (!this.staticLookLine) return;
     const a = this.staticPosSphere?.position;
-    const b = this.staticLookSphere?.position;
-    if (!a || !b) return;
-    this.staticLookLine.geometry.dispose();
-    this.staticLookLine.geometry = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+    // パン軌跡線（注視点キーフレームを結ぶ）
+    if (this.staticAimLine && this.staticAimSpheres.length >= 2) {
+      this.staticAimLine.geometry.dispose();
+      this.staticAimLine.geometry = new THREE.BufferGeometry().setFromPoints(
+        this.staticAimSpheres.map((s) => s.position.clone())
+      );
+    }
+    // pos→注視点 の線（選択中キー or fixed の look）
+    const b = this.staticAimSpheres[this.state.aimKey]?.position ?? this.staticLookSphere?.position;
+    if (this.staticLookLine && a && b) {
+      this.staticLookLine.geometry.dispose();
+      this.staticLookLine.geometry = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+    }
   }
 
   /** 定点ショットの編集パネル: ① position ② look/aim ③ timing/fov/cut */
@@ -467,13 +531,17 @@ export class PathEditor {
 
     // ② look / aim
     const lookF = this.kfFolder.addFolder('② look / aim（注視）');
-    const mode = shot.lookAt?.target ?? 'fixed';
+    const mode = Array.isArray(shot.lookAt?.keys)
+      ? 'keyframe'
+      : shot.lookAt?.target ?? 'fixed';
     lookF
-      .add({ mode }, 'mode', ['fixed', 'bottle', 'heroParticle'])
+      .add({ mode }, 'mode', ['fixed', 'bottle', 'heroParticle', 'keyframe'])
       .name('注視対象')
       .onChange((m) => this._setStaticLookMode(m));
     let lookProxy = null;
     let lookCtrls = [];
+    let aimKeyProxy = null;
+    let aimKeyCtrls = [];
     if (mode === 'fixed') {
       if (!Array.isArray(shot.lookAt?.point)) shot.lookAt = { mode: 'fixed', point: [0, 0.5, 0] };
       const lp = shot.lookAt.point;
@@ -488,6 +556,45 @@ export class PathEditor {
             this.onChanged?.();
           })
       );
+    } else if (mode === 'keyframe') {
+      // パン: 注視点キーフレーム列。各キーは t（0–1＝ショット内進行）と look 点
+      const keys = shot.lookAt.keys;
+      this.state.aimKey = Math.min(this.state.aimKey ?? 0, keys.length - 1);
+      lookF
+        .add({ lerp: shot.lookAt.lerp ?? 1.0 }, 'lerp', 0.01, 1, 0.01)
+        .name('追従 lerp（1=即時）')
+        .onChange((v) => {
+          shot.lookAt.lerp = Number(v.toFixed(3));
+          this.onChanged?.();
+        });
+      lookF.add({ add: () => this._addAimKey() }, 'add').name('＋ 注視点キーフレーム');
+      lookF.add({ rm: () => this._removeAimKey() }, 'rm').name('− 注視点キーフレーム');
+      const i = this.state.aimKey;
+      lookF
+        .add({ s: `#${i}/${keys.length - 1}（緑球クリックで選択）` }, 's')
+        .name('編集中キー')
+        .disable();
+      lookF.add({ prev: () => this._selectAimKey(Math.max(0, i - 1)) }, 'prev').name('◀ 前のキー');
+      lookF.add({ next: () => this._selectAimKey(Math.min(keys.length - 1, i + 1)) }, 'next').name('次のキー ▶');
+      const k = keys[i];
+      if (k) {
+        if (!Array.isArray(k.point)) k.point = [0, 0.5, 0];
+        lookF
+          .add(k, 't', 0, 1, 0.01)
+          .name('t（ショット内 0–1）')
+          .onChange(() => this.onChanged?.());
+        aimKeyProxy = { x: k.point[0], y: k.point[1], z: k.point[2] };
+        aimKeyCtrls = ['x', 'y', 'z'].map((ax, ai) =>
+          lookF
+            .add(aimKeyProxy, ax, -20, 20, 0.01)
+            .name(`look ${ax}`)
+            .onChange((v) => {
+              k.point[ai] = Number(v.toFixed(3));
+              this._rebuildStaticViz();
+              this.onChanged?.();
+            })
+        );
+      }
     } else {
       lookF
         .add({ lerp: shot.lookAt?.lerp ?? 1.0 }, 'lerp', 0.01, 1, 0.01)
@@ -521,7 +628,16 @@ export class PathEditor {
       this.onChanged?.();
     });
 
-    this.staticPanel = { posProxy, posCtrls, lookProxy, lookCtrls };
+    this.staticPanel = { posProxy, posCtrls, lookProxy, lookCtrls, aimKeyProxy, aimKeyCtrls };
+  }
+
+  /** ギズモで注視点キーを動かした時、パネルの look x/y/z 表示を同期 */
+  _syncStaticPanelAim(shot) {
+    const sp = this.staticPanel;
+    const k = shot.lookAt?.keys?.[this.state.aimKey];
+    if (!sp?.aimKeyProxy || !Array.isArray(k?.point)) return;
+    [sp.aimKeyProxy.x, sp.aimKeyProxy.y, sp.aimKeyProxy.z] = k.point;
+    sp.aimKeyCtrls.forEach((c) => c.updateDisplay());
   }
 
   _syncStaticPanelPos(shot) {
@@ -553,12 +669,65 @@ export class PathEditor {
 
   _setStaticLookMode(m) {
     const shot = this._currentShot();
+    const base = Array.isArray(shot.lookAt?.point)
+      ? shot.lookAt.point
+      : Array.isArray(shot.lookAt?.keys?.[0]?.point)
+        ? shot.lookAt.keys[0].point
+        : [0, 0.5, 0];
     if (m === 'fixed') {
-      const point = Array.isArray(shot.lookAt?.point) ? shot.lookAt.point : [0, 0.5, 0];
-      shot.lookAt = { mode: 'fixed', point };
+      shot.lookAt = { mode: 'fixed', point: [...base] };
+    } else if (m === 'keyframe') {
+      // 2点のパンを初期生成（現在の注視点 → 横へ2m）。t は 0→1
+      shot.lookAt = {
+        lerp: shot.lookAt?.lerp ?? 1.0,
+        keys: [
+          { t: 0, point: [...base] },
+          { t: 1, point: [base[0] + 2, base[1], base[2]] },
+        ],
+      };
+      this.state.aimKey = 0;
     } else {
       shot.lookAt = { mode: 'target', target: m, lerp: shot.lookAt?.lerp ?? 1.0 };
     }
+    this._rebuildStaticViz();
+    this._buildStaticPanel();
+    this.onChanged?.();
+  }
+
+  /** 選択中の注視点キーを切替（緑球クリック / 前後ボタン） */
+  _selectAimKey(i) {
+    this.state.aimKey = i;
+    this.sel = { kind: 'static-aimkey', side: null };
+    this._rebuildStaticViz();
+    this._buildStaticPanel();
+  }
+
+  /** 注視点キーフレームを選択キーの直後に追加 */
+  _addAimKey() {
+    const shot = this._currentShot();
+    const keys = shot.lookAt?.keys;
+    if (!keys) return;
+    const i = this.state.aimKey;
+    const cur = keys[i];
+    const next = keys[i + 1];
+    const t = next ? (cur.t + next.t) / 2 : Math.min(1, (cur.t ?? 0) + 0.25);
+    const point = Array.isArray(cur.point) ? [...cur.point] : [0, 0.5, 0];
+    keys.splice(i + 1, 0, { t: Number(t.toFixed(3)), point });
+    this.state.aimKey = i + 1;
+    this.sel = { kind: 'static-aimkey', side: null };
+    this._rebuildStaticViz();
+    this._buildStaticPanel();
+    this.onChanged?.();
+  }
+
+  /** 注視点キーフレームを削除（最低2点は残す＝パンの両端） */
+  _removeAimKey() {
+    const shot = this._currentShot();
+    const keys = shot.lookAt?.keys;
+    if (!keys || keys.length <= 2) return;
+    keys.splice(this.state.aimKey, 1);
+    this.state.aimKey = Math.max(0, this.state.aimKey - 1);
+    this.sel = { kind: 'static-aimkey', side: null };
     this._rebuildStaticViz();
     this._buildStaticPanel();
     this.onChanged?.();
@@ -875,6 +1044,7 @@ export class PathEditor {
     const targets = [
       ...this.handles,
       ...(this.aimSphere ? [this.aimSphere] : []),
+      ...this.staticAimSpheres,
       ...(this.staticLookSphere ? [this.staticLookSphere] : []),
       ...(this.staticPosSphere ? [this.staticPosSphere] : []),
       ...this.spheres,
@@ -889,7 +1059,9 @@ export class PathEditor {
     const hits = this.raycaster.intersectObjects(targets, false);
     if (!hits.length) return;
     const ud = hits[0].object.userData;
-    if (ud.kind === 'static-pos' || ud.kind === 'static-look') {
+    if (ud.kind === 'static-aimkey') {
+      this._selectAimKey(ud.index); // 注視点キーを選択（ギズモ＆パネル更新）
+    } else if (ud.kind === 'static-pos' || ud.kind === 'static-look') {
       this.sel = { kind: ud.kind, side: null };
       this._attachStaticGizmo();
     } else if (ud.kind === 'handle') {
@@ -994,6 +1166,20 @@ export class PathEditor {
     if (!obj) return;
     const ud = obj.userData;
 
+    if (ud.kind === 'static-aimkey') {
+      const shot = this._currentShot();
+      const k = shot.lookAt?.keys?.[ud.index];
+      if (!k) return;
+      k.point = [
+        Number(obj.position.x.toFixed(3)),
+        Number(obj.position.y.toFixed(3)),
+        Number(obj.position.z.toFixed(3)),
+      ];
+      this._redrawStaticLine();
+      this._syncStaticPanelAim(shot);
+      this.onChanged?.();
+      return;
+    }
     if (ud.kind === 'static-pos') {
       const shot = this._currentShot();
       const local = obj.position.clone().sub(this._shotOffset(shot));

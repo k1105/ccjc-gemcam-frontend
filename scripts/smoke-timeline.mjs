@@ -181,6 +181,14 @@ assert(afterAdd.hasStaticBake, 'static ショットがベイクに反映');
 assert(afterAdd.newIdx === phShot.index + 1, `プレイヘッド(${phShot.id})直後に挿入 (index ${afterAdd.newIdx})`);
 assert(afterAdd.overridden, `オーバーレイが開始フレーム(${afterAdd.startFrame})で base を上書き`);
 
+// 選択中ショットのタイムライン枠ハイライト
+const hi = await page.evaluate(() => {
+  const sel = [...document.querySelectorAll('.tlx-phase.tlx-selected')];
+  const id = window.app.editor.pathEditor.state.phaseId;
+  return { count: sel.length, matches: sel.length === 1 && sel[0].dataset.shot === id };
+});
+assert(hi.matches, `選択ショットのみ枠ハイライト (selected=${hi.count})`);
+
 console.log('--- drag static block to retime (start) ---');
 const startBefore = await page.evaluate(
   () => window.app.ctx.choreo.data.generate.shots.find((s) => s.type === 'static').start

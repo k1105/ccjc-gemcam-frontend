@@ -641,6 +641,15 @@ export class Timeline {
     this.playhead.className = 'tlx-playhead';
     this.track.appendChild(this.playhead);
     this._renderPlayhead();
+    this._highlightSelectedShot();
+  }
+
+  /** 選択中ショット（pathEditor.state.phaseId）のブロックを枠でハイライト */
+  _highlightSelectedShot() {
+    const selId = this.pathEditor?.state?.phaseId;
+    this.track?.querySelectorAll('.tlx-phase').forEach((el) => {
+      el.classList.toggle('tlx-selected', el.dataset.shot === selId);
+    });
   }
 
   /**
@@ -787,6 +796,10 @@ function injectStyles() {
 .tlx-loop   { background: linear-gradient(#2a7d72, #226359); }
 .tlx-follow, .tlx-loop {
   background-image: repeating-linear-gradient(-45deg, rgba(255,255,255,0.06) 0 6px, transparent 6px 12px);
+}
+.tlx-phase.tlx-selected {
+  box-shadow: inset 0 0 0 2px #ffd166, 0 0 6px rgba(255, 209, 102, 0.5);
+  border-radius: 3px; z-index: 2;
 }
 .tlx-phase-label {
   position: absolute; left: 6px; top: 3px; color: #fff; white-space: nowrap;

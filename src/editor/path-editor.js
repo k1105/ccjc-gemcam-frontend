@@ -168,6 +168,7 @@ export class PathEditor {
   /** ショット切替・import 後などの全再構築。ショット種別で編集UIを振り分ける */
   rebuild() {
     this._updateShotReadout();
+    this.timeline?._highlightSelectedShot?.(); // タイムラインの選択ハイライト更新
     const shot = this._currentShot();
     if (!shot) {
       this._clearPathViz();

@@ -8,18 +8,27 @@ const SELECTED_COLOR = 0xffd166;
 const NORMAL_COLOR = 0xff4060;
 const HANDLE_COLOR = 0x46d3ff;
 const AIM_COLOR = 0x7cffb0; // 注視点(look)オーバーライド
+const STATIC_COLOR = 0xffa040; // 定点(static)ショットの位置マーカー
 
 /**
- * generate.shots（path 型ショット）のカメラパスを 3Dビューポート上で編集するツール。
+ * generate.shots を 3Dビューポート上で編集するショットエディタ。
+ *
+ * 【ショット管理】Shots フォルダで 定点/パス ショットの追加・削除・並べ替え。選択は
+ *   タイムラインの◆（パス=キーフレーム / 定点=ショット）から。
+ *
+ * 【path ショット】カメラパスの編集:
  * - 位置キーフレーム（アンカー）: クリック選択 / TransformControls ドラッグ / 数値編集
  * - ベジェ: 各キーフレームを auto（CatmullRom自動接線）/ manual（in/out ハンドル）で切替
- * - 注視点(look)オーバーライド: 各キーフレームに任意で注視点を持たせられる。緑のポインタ球を
- *   ビューポートでドラッグして「このキーフレーム付近ではここを見る」を指定。カメラが
- *   キーフレーム間を進むのに合わせて注視点が補間される（look 未指定のキーはフェーズ既定 lookAt）。
- * - 曲線/向きの評価は camera-eval（本番と共通）。パス変更は onChanged で通知（タイムライン自動リベイク）。
- * "@current" キーフレームは実行時カメラ位置に置換されるため編集対象外。
+ * - 注視点(look)オーバーライド: 各キーフレームに任意で注視点を持たせられる（緑ポインタ）
+ * - "@current" キーフレームは実行時カメラ位置に置換されるため編集対象外。
  *
- * データ形:
+ * 【static ショット】定点カメラの編集:
+ * - 位置（橙マーカー）/ 注視点（緑ポインタ。fixed のみドラッグ可）を gizmo で操作
+ * - 注視対象 fixed/bottle/heroParticle・duration・fov・cut（ハードカット）を GUI で
+ *
+ * 曲線/向きの評価は camera-eval（本番と共通）。変更は onChanged で通知（タイムライン自動リベイク）。
+ *
+ * path キーフレームのデータ形:
  *   auto              … [x,y,z]
  *   manual / look付き  … { p:[x,y,z], hIn?, hOut?, look?:[lx,ly,lz] }
  */
@@ -33,7 +42,7 @@ export class PathEditor {
     this.sel = { kind: 'anchor', side: null }; // 'anchor' | 'handle'(side) | 'aim'
 
     this.state = {
-      phaseId: this._phases()[0]?.id ?? '', // タイムライン/3Dクリックで切替（ドロップダウン無し）
+      phaseId: this._shots()[0]?.id ?? '', // 選択中ショット。タイムライン◆/管理ボタンで切替
       keyframe: 0,
       preview: () => this._preview(),
       addKeyframe: () => this._addKeyframe(),
@@ -50,6 +59,11 @@ export class PathEditor {
     this.aimSphere = null; // 選択中KFの注視点ポインタ
     this.aimLine = null; // KF位置→注視点 の線
     this.kfPanel = null;
+    // static ショット用のビューポート要素
+    this.staticPosSphere = null; // 定点位置マーカー（橙）
+    this.staticLookSphere = null; // 定点の注視点（緑、fixed のみ）
+    this.staticLookLine = null;
+    this.staticPanel = null;
 
     this.tc = new TransformControls(ctx.world.camera, ctx.world.renderer.domElement);
     this.tcHelper = this.tc.getHelper();
@@ -63,30 +77,59 @@ export class PathEditor {
     this._onPointerDown = (e) => this._pick(e);
     ctx.world.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
 
-    // フェーズ/キーフレームの選択はタイムラインの◆・3Dクリックで行う（ドロップダウンは廃止）
-    this.gui.add(this.state, 'preview').name('▶ Preview phase（実時間再生）');
-    this.gui.add(this.state, 'addKeyframe').name('+ keyframe（選択の直後に挿入）');
-    this.gui.add(this.state, 'removeKeyframe').name('− keyframe（選択を削除）');
+    // ショット/キーフレームの選択はタイムラインの◆・3Dクリック・管理ボタンで行う
+    this.gui.add(this.state, 'preview').name('▶ Preview shot（実時間再生）');
 
-    this.kfFolder = this.gui.addFolder('Selected keyframe');
+    // ショット管理（追加/削除/並べ替え。選択中ショットに対して作用）
+    this.shotsFolder = this.gui.addFolder('Shots（再生順・管理）');
+    this._shotReadout = { cur: '—' };
+    this._shotReadoutCtrl = this.shotsFolder.add(this._shotReadout, 'cur').name('選択中').disable();
+    const acts = {
+      addStatic: () => this._addShot('static'),
+      addPath: () => this._addShot('path'),
+      up: () => this._moveShot(-1),
+      down: () => this._moveShot(1),
+      remove: () => this._removeShot(),
+    };
+    this.shotsFolder.add(acts, 'addStatic').name('＋ 定点ショット（選択の直後）');
+    this.shotsFolder.add(acts, 'addPath').name('＋ パスショット（選択の直後）');
+    this.shotsFolder.add(acts, 'up').name('↑ 前へ移動');
+    this.shotsFolder.add(acts, 'down').name('↓ 後へ移動');
+    this.shotsFolder.add(acts, 'remove').name('🗑 ショット削除');
+
+    this.kfFolder = this.gui.addFolder('Selected shot');
     this.rebuild();
+  }
+
+  _shots() {
+    return this.ctx.choreo.data.generate.shots;
+  }
+
+  _currentShot() {
+    return this._shots().find((s) => s.id === this.state.phaseId);
   }
 
   _phases() {
     return this.ctx.choreo.data.generate.shots.filter((p) => Array.isArray(p.path));
   }
 
+  /** 選択中ショットが path 型ならそれを返す（path 編集系メソッド用。static 等では undefined） */
   _currentPhase() {
-    return this._phases().find((p) => p.id === this.state.phaseId);
+    const s = this._currentShot();
+    return s && Array.isArray(s.path) ? s : undefined;
   }
 
-  /** relativeTo を解決したワールドオフセット */
-  _offset() {
-    const phase = this._currentPhase();
-    if (phase?.relativeTo !== 'bottle') return new THREE.Vector3();
+  /** ショットの relativeTo を解決したワールドオフセット */
+  _shotOffset(shot) {
+    if (shot?.relativeTo !== 'bottle') return new THREE.Vector3();
     const g = this.ctx.choreo.data.generate;
     const scale = g.bottleScale ?? 1.6;
     return new THREE.Vector3(...g.bottlePos).add(new THREE.Vector3(0, 0.4 * scale, 0));
+  }
+
+  /** 選択中 path ショットの relativeTo ワールドオフセット */
+  _offset() {
+    return this._shotOffset(this._currentPhase());
   }
 
   _localPos(entry) {
@@ -119,17 +162,65 @@ export class PathEditor {
     if (active) this.rebuild();
   }
 
-  /** phase 切替・import 後などの全再構築 */
+  /** ショット切替・import 後などの全再構築。ショット種別で編集UIを振り分ける */
   rebuild() {
-    const phase = this._currentPhase();
-    if (!phase) return;
+    this._updateShotReadout();
+    const shot = this._currentShot();
+    if (!shot) {
+      this._clearPathViz();
+      this._disposeStatic();
+      return;
+    }
 
+    if (shot.type === 'static') {
+      this.sel = { kind: 'static-pos', side: null };
+      this._rebuildStaticViz();
+      this._buildStaticPanel();
+      return;
+    }
+    if (!Array.isArray(shot.path)) {
+      // follow / loop: ビューポート編集なし（数値は Parameters で）
+      this._clearPathViz();
+      this._disposeStatic();
+      this._buildHoldPanel(shot);
+      return;
+    }
+
+    // path
+    const phase = shot;
     const editable = phase.path.map((e, i) => (e === '@current' ? -1 : i)).filter((i) => i >= 0);
     this.state.keyframe = editable.includes(this.state.keyframe) ? this.state.keyframe : editable[0] ?? 0;
     this.sel = { kind: 'anchor', side: null };
 
     this._rebuildViz();
     this._buildKfPanel();
+  }
+
+  _updateShotReadout() {
+    const shots = this._shots();
+    const cur = this._currentShot();
+    this._shotReadout.cur = cur ? `#${shots.indexOf(cur)} ${cur.id} (${cur.type})` : '—';
+    this._shotReadoutCtrl?.updateDisplay();
+  }
+
+  /** path 系ビューポート要素（アンカー/線/ハンドル/aim）を全消去 */
+  _clearPathViz() {
+    for (const s of this.spheres) {
+      this.viz.remove(s);
+      s.geometry.dispose();
+      s.material.dispose();
+    }
+    this.spheres = [];
+    if (this.line) {
+      this.viz.remove(this.line);
+      this.line.geometry.dispose();
+      this.line.material.dispose();
+      this.line = null;
+    }
+    this._rebuildHandles(); // 現在が非 path なら破棄のみ（guard 済）
+    this._rebuildAim();
+    this.tc.detach();
+    this.tcHelper.visible = false;
   }
 
   /** path[i] のアンカー軸を書き込む（auto=配列 / object 両対応） */
@@ -241,6 +332,312 @@ export class PathEditor {
     }
   }
 
+  // ---- static（定点）ショット ----
+
+  /** static の注視点（fixed のみ点を返す。target はビューポート表示しない＝null） */
+  _staticLookPoint(shot) {
+    const lc = shot.lookAt;
+    if (Array.isArray(lc?.point)) return new THREE.Vector3(...lc.point);
+    if (lc?.target === 'bottle') return this._shotOffset({ relativeTo: 'bottle' });
+    return null;
+  }
+
+  /** static のワールド位置（"@current" は不定なので null） */
+  _staticPosWorld(shot) {
+    if (shot.pos === '@current') return null;
+    return new THREE.Vector3(...shot.pos).add(this._shotOffset(shot));
+  }
+
+  _disposeStatic() {
+    for (const k of ['staticPosSphere', 'staticLookSphere', 'staticLookLine']) {
+      const o = this[k];
+      if (!o) continue;
+      this.viz.remove(o);
+      o.geometry.dispose();
+      o.material.dispose();
+      this[k] = null;
+    }
+  }
+
+  /** 定点ショットのビューポート要素（位置マーカー＋注視点＋線）を再構築 */
+  _rebuildStaticViz() {
+    this._clearPathViz();
+    this._disposeStatic();
+    const shot = this._currentShot();
+    if (!shot || shot.type !== 'static' || !this.active) {
+      this.tc.detach();
+      this.tcHelper.visible = false;
+      return;
+    }
+
+    const posW = this._staticPosWorld(shot);
+    if (posW) {
+      this.staticPosSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 16, 12),
+        new THREE.MeshBasicMaterial({ color: STATIC_COLOR, depthTest: false, transparent: true })
+      );
+      this.staticPosSphere.renderOrder = 999;
+      this.staticPosSphere.position.copy(posW);
+      this.staticPosSphere.userData = { kind: 'static-pos' };
+      this.viz.add(this.staticPosSphere);
+    }
+
+    const lp = this._staticLookPoint(shot);
+    const draggableLook = Array.isArray(shot.lookAt?.point); // fixed のみドラッグ可
+    if (lp && draggableLook) {
+      this.staticLookSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.05, 12, 10),
+        new THREE.MeshBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true })
+      );
+      this.staticLookSphere.renderOrder = 1000;
+      this.staticLookSphere.position.copy(lp);
+      this.staticLookSphere.userData = { kind: 'static-look' };
+      this.viz.add(this.staticLookSphere);
+    }
+    if (lp && posW) {
+      this.staticLookLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([posW.clone(), lp.clone()]),
+        new THREE.LineBasicMaterial({ color: AIM_COLOR, depthTest: false, transparent: true, opacity: 0.6 })
+      );
+      this.staticLookLine.renderOrder = 997;
+      this.viz.add(this.staticLookLine);
+    }
+
+    this._attachStaticGizmo();
+  }
+
+  _attachStaticGizmo() {
+    let obj = null;
+    if (this.sel.kind === 'static-look') obj = this.staticLookSphere;
+    if (!obj) {
+      this.sel = { kind: 'static-pos', side: null };
+      obj = this.staticPosSphere ?? this.staticLookSphere;
+    }
+    if (obj && this.active) {
+      this.tc.attach(obj);
+      this.tcHelper.visible = true;
+    } else {
+      this.tc.detach();
+      this.tcHelper.visible = false;
+    }
+  }
+
+  /** static の look 線だけ更新（球は dispose しない） */
+  _redrawStaticLine() {
+    if (!this.staticLookLine) return;
+    const a = this.staticPosSphere?.position;
+    const b = this.staticLookSphere?.position;
+    if (!a || !b) return;
+    this.staticLookLine.geometry.dispose();
+    this.staticLookLine.geometry = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+  }
+
+  /** 定点ショットの編集パネル: ① position ② look/aim ③ timing/fov/cut */
+  _buildStaticPanel() {
+    this.kfFolder.destroy();
+    this.kfFolder = this.gui.addFolder('Selected shot');
+    this.kfPanel = null;
+    this.aimProxy = null;
+    this.aimCtrls = null;
+    this.staticPanel = null;
+
+    const shot = this._currentShot();
+    if (!shot) return;
+    this.kfFolder.add({ t: `${shot.id}（定点 static）` }, 't').name('shot').disable();
+
+    // ① position
+    const posF = this.kfFolder.addFolder('① position（定点位置）');
+    const isCurrent = shot.pos === '@current';
+    posF.add({ on: isCurrent }, 'on').name('"@current"（実行時カメラ位置）').onChange((on) => this._setStaticCurrent(on));
+    let posProxy = null;
+    let posCtrls = [];
+    if (!isCurrent) {
+      posProxy = { x: shot.pos[0], y: shot.pos[1], z: shot.pos[2] };
+      posCtrls = ['x', 'y', 'z'].map((ax, ai) =>
+        posF
+          .add(posProxy, ax, -20, 20, 0.01)
+          .name(ax)
+          .onChange((v) => {
+            shot.pos[ai] = Number(v.toFixed(3));
+            this._rebuildStaticViz();
+            this.onChanged?.();
+          })
+      );
+    }
+
+    // ② look / aim
+    const lookF = this.kfFolder.addFolder('② look / aim（注視）');
+    const mode = shot.lookAt?.target ?? 'fixed';
+    lookF
+      .add({ mode }, 'mode', ['fixed', 'bottle', 'heroParticle'])
+      .name('注視対象')
+      .onChange((m) => this._setStaticLookMode(m));
+    let lookProxy = null;
+    let lookCtrls = [];
+    if (mode === 'fixed') {
+      if (!Array.isArray(shot.lookAt?.point)) shot.lookAt = { mode: 'fixed', point: [0, 0.5, 0] };
+      const lp = shot.lookAt.point;
+      lookProxy = { x: lp[0], y: lp[1], z: lp[2] };
+      lookCtrls = ['x', 'y', 'z'].map((ax, ai) =>
+        lookF
+          .add(lookProxy, ax, -20, 20, 0.01)
+          .name(ax)
+          .onChange((v) => {
+            shot.lookAt.point[ai] = Number(v.toFixed(3));
+            this._rebuildStaticViz();
+            this.onChanged?.();
+          })
+      );
+    } else {
+      lookF
+        .add({ lerp: shot.lookAt?.lerp ?? 1.0 }, 'lerp', 0.01, 1, 0.01)
+        .name('追従 lerp')
+        .onChange((v) => {
+          shot.lookAt.lerp = Number(v.toFixed(3));
+          this.onChanged?.();
+        });
+    }
+
+    // ③ timing / fov / cut
+    const tF = this.kfFolder.addFolder('③ timing / fov');
+    tF.add(shot, 'duration', 0.1, 15, 0.1).name('duration（秒）').onChange(() => this.onChanged?.());
+    if (Array.isArray(shot.fov)) {
+      tF.add(shot.fov, 0, 10, 120, 1).name('fov 開始').onChange(() => this.onChanged?.());
+      tF.add(shot.fov, 1, 10, 120, 1).name('fov 終了').onChange(() => this.onChanged?.());
+    } else {
+      const fp = { fov: shot.fov ?? 45 };
+      tF.add(fp, 'fov', 10, 120, 1).name('fov').onChange((v) => {
+        shot.fov = v;
+        this.onChanged?.();
+      });
+    }
+    tF.add({ cut: !!shot.cut }, 'cut').name('cut（直前からハードカット）').onChange((on) => {
+      shot.cut = on;
+      this.onChanged?.();
+    });
+
+    this.staticPanel = { posProxy, posCtrls, lookProxy, lookCtrls };
+  }
+
+  _syncStaticPanelPos(shot) {
+    const sp = this.staticPanel;
+    if (!sp?.posProxy || shot.pos === '@current') return;
+    [sp.posProxy.x, sp.posProxy.y, sp.posProxy.z] = shot.pos;
+    sp.posCtrls.forEach((c) => c.updateDisplay());
+  }
+
+  _syncStaticPanelLook(shot) {
+    const sp = this.staticPanel;
+    if (!sp?.lookProxy || !Array.isArray(shot.lookAt?.point)) return;
+    [sp.lookProxy.x, sp.lookProxy.y, sp.lookProxy.z] = shot.lookAt.point;
+    sp.lookCtrls.forEach((c) => c.updateDisplay());
+  }
+
+  _setStaticCurrent(on) {
+    const shot = this._currentShot();
+    if (on) {
+      shot.pos = '@current';
+    } else {
+      const p = this.ctx.world.camera.position;
+      shot.pos = [Number(p.x.toFixed(2)), Number(p.y.toFixed(2)), Number(p.z.toFixed(2))];
+    }
+    this._rebuildStaticViz();
+    this._buildStaticPanel();
+    this.onChanged?.();
+  }
+
+  _setStaticLookMode(m) {
+    const shot = this._currentShot();
+    if (m === 'fixed') {
+      const point = Array.isArray(shot.lookAt?.point) ? shot.lookAt.point : [0, 0.5, 0];
+      shot.lookAt = { mode: 'fixed', point };
+    } else {
+      shot.lookAt = { mode: 'target', target: m, lerp: shot.lookAt?.lerp ?? 1.0 };
+    }
+    this._rebuildStaticViz();
+    this._buildStaticPanel();
+    this.onChanged?.();
+  }
+
+  /** follow / loop 選択時の情報パネル（ビューポート編集なし） */
+  _buildHoldPanel(shot) {
+    this.kfFolder.destroy();
+    this.kfFolder = this.gui.addFolder('Selected shot');
+    this.kfPanel = null;
+    this.kfFolder.add({ t: `${shot.id}（${shot.type}・ホールド）` }, 't').name('shot').disable();
+    this.kfFolder
+      .add({ i: '数値は Parameters > generate で調整' }, 'i')
+      .name('info')
+      .disable();
+  }
+
+  // ---- ショット管理（追加 / 削除 / 並べ替え / 選択） ----
+
+  _uniqueId(base) {
+    const ids = new Set(this._shots().map((s) => s.id));
+    let n = 1;
+    while (ids.has(`${base}-${n}`)) n++;
+    return `${base}-${n}`;
+  }
+
+  /** 選択ショットの直後に新規ショットを挿入して選択する */
+  _addShot(type) {
+    const shots = this._shots();
+    const cur = this._currentShot();
+    const at = cur ? shots.indexOf(cur) + 1 : shots.length;
+    const id = this._uniqueId(type);
+    const shot =
+      type === 'static'
+        ? { id, type: 'static', duration: 2.0, pos: [0, 1, 3], lookAt: { mode: 'fixed', point: [0, 0.5, 0] }, fov: 45 }
+        : {
+            id,
+            type: 'path',
+            duration: 2.0,
+            ease: 'none',
+            path: [[0, 1, 3], [0, 1, 1]],
+            lookAt: { mode: 'fixed', point: [0, 0.5, 0] },
+          };
+    shots.splice(at, 0, shot);
+    this.state.phaseId = id;
+    this.state.keyframe = 0;
+    this.sel = { kind: 'anchor', side: null };
+    this.rebuild();
+    this.onChanged?.();
+  }
+
+  _removeShot() {
+    const shots = this._shots();
+    if (shots.length <= 1) return; // 最低1ショットは残す
+    const i = shots.indexOf(this._currentShot());
+    if (i < 0) return;
+    shots.splice(i, 1);
+    const next = shots[Math.max(0, i - 1)];
+    this.state.phaseId = next.id;
+    this.state.keyframe = 0;
+    this.sel = { kind: 'anchor', side: null };
+    this.rebuild();
+    this.onChanged?.();
+  }
+
+  _moveShot(dir) {
+    const shots = this._shots();
+    const i = shots.indexOf(this._currentShot());
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= shots.length) return;
+    [shots[i], shots[j]] = [shots[j], shots[i]];
+    this.rebuild();
+    this.onChanged?.();
+  }
+
+  /** 外部（タイムラインのショットブロック/◆）からショットを選択 */
+  selectShot(shotId) {
+    if (!this._shots().some((s) => s.id === shotId)) return;
+    this.state.phaseId = shotId;
+    this.state.keyframe = 0;
+    this.sel = { kind: 'anchor', side: null };
+    this.rebuild();
+  }
+
   // ---- 可視化 ----
 
   _rebuildViz() {
@@ -250,6 +647,7 @@ export class PathEditor {
       s.material.dispose();
     }
     this.spheres = [];
+    this._disposeStatic(); // path 表示時は static マーカーを消す
 
     const phase = this._currentPhase();
     const offset = this._offset();
@@ -306,6 +704,7 @@ export class PathEditor {
     }
 
     const phase = this._currentPhase();
+    if (!phase) return; // static/follow/loop 選択時は破棄のみ
     const entry = phase.path[this.state.keyframe];
     if (!entry || entry === '@current' || !this._isManual(entry)) return;
 
@@ -447,7 +846,13 @@ export class PathEditor {
   _pick(e) {
     if (!this.active || e.button !== 0) return;
     if (this.tc.axis) return;
-    const targets = [...this.handles, ...(this.aimSphere ? [this.aimSphere] : []), ...this.spheres];
+    const targets = [
+      ...this.handles,
+      ...(this.aimSphere ? [this.aimSphere] : []),
+      ...(this.staticLookSphere ? [this.staticLookSphere] : []),
+      ...(this.staticPosSphere ? [this.staticPosSphere] : []),
+      ...this.spheres,
+    ];
     if (!targets.length) return;
     const rect = this.ctx.world.renderer.domElement.getBoundingClientRect();
     _ndc.set(
@@ -458,7 +863,10 @@ export class PathEditor {
     const hits = this.raycaster.intersectObjects(targets, false);
     if (!hits.length) return;
     const ud = hits[0].object.userData;
-    if (ud.kind === 'handle') {
+    if (ud.kind === 'static-pos' || ud.kind === 'static-look') {
+      this.sel = { kind: ud.kind, side: null };
+      this._attachStaticGizmo();
+    } else if (ud.kind === 'handle') {
       this.sel = { kind: 'handle', side: ud.side };
       this._attachGizmo();
     } else if (ud.kind === 'aim') {
@@ -559,6 +967,31 @@ export class PathEditor {
     const obj = this.tc.object;
     if (!obj) return;
     const ud = obj.userData;
+
+    if (ud.kind === 'static-pos') {
+      const shot = this._currentShot();
+      const local = obj.position.clone().sub(this._shotOffset(shot));
+      shot.pos = [Number(local.x.toFixed(3)), Number(local.y.toFixed(3)), Number(local.z.toFixed(3))];
+      this._redrawStaticLine();
+      this._syncStaticPanelPos(shot);
+      this.onChanged?.();
+      return;
+    }
+    if (ud.kind === 'static-look') {
+      const shot = this._currentShot();
+      shot.lookAt = shot.lookAt ?? { mode: 'fixed' };
+      shot.lookAt.mode = 'fixed';
+      shot.lookAt.point = [
+        Number(obj.position.x.toFixed(3)),
+        Number(obj.position.y.toFixed(3)),
+        Number(obj.position.z.toFixed(3)),
+      ];
+      this._redrawStaticLine();
+      this._syncStaticPanelLook(shot);
+      this.onChanged?.();
+      return;
+    }
+
     const phase = this._currentPhase();
     const offset = this._offset();
 
@@ -625,6 +1058,7 @@ export class PathEditor {
   /** 選択キーフレームの直後に挿入（次点との中点。末尾なら少し先へ）。auto で挿入 */
   _addKeyframe() {
     const phase = this._currentPhase();
+    if (!phase) return; // path ショット選択時のみ
     const i = this.state.keyframe;
     const cur = this._localPos(phase.path[i]);
     const nextEntry = phase.path[i + 1];
@@ -640,6 +1074,7 @@ export class PathEditor {
 
   _removeKeyframe() {
     const phase = this._currentPhase();
+    if (!phase) return; // path ショット選択時のみ
     const editableCount = phase.path.filter((p) => p !== '@current').length;
     if (phase.path.length <= 2 || editableCount <= 1) return;
     const i = this.state.keyframe;
@@ -651,11 +1086,11 @@ export class PathEditor {
     this.onChanged?.();
   }
 
-  /** phase 単体プレビュー */
+  /** ショット単体プレビュー */
   _preview() {
     const { director, manager, choreo } = this.ctx;
-    const phase = this._currentPhase();
-    if (!phase) return;
+    const shot = this._currentShot();
+    if (!shot) return;
 
     if (!manager.is('generate')) {
       const g = choreo.data.generate;
@@ -665,11 +1100,16 @@ export class PathEditor {
       director.registerTarget('heroParticle', (out) => out.copy(bottleCenter));
     }
 
-    if (phase.type === 'loop') {
-      const hold = director.playLoop(phase);
+    if (shot.type === 'loop') {
+      const hold = director.playLoop(shot);
       setTimeout(() => hold.release(), 3000);
+    } else if (shot.type === 'follow') {
+      const hold = director.playFollow(shot);
+      setTimeout(() => hold.release(), 3000);
+    } else if (shot.type === 'static') {
+      director.playStatic(shot);
     } else {
-      director.playPhase(phase);
+      director.playPhase(shot);
     }
   }
 
@@ -703,5 +1143,6 @@ export class PathEditor {
       this.line.geometry.dispose();
       this.line.material.dispose();
     }
+    this._disposeStatic();
   }
 }

@@ -50,6 +50,7 @@ export class Timeline {
     this.heroMarker = null;
     this.orbit = null;
     this._orbitInitialized = false;
+    this._freeCamSnapshot = null; // cam⇄free トグル間で俯瞰カメラ姿勢を保持
 
     this._tick = this._tick.bind(this);
     this._onKeyDown = this._onKeyDown.bind(this);
@@ -224,7 +225,9 @@ export class Timeline {
       this.lookLine.visible = true;
       this.traj.visible = true;
       this.heroMarker.visible = true;
-      // 初回のみ軌跡全体が収まる俯瞰位置へ（以降はユーザーの操作位置を維持）
+      // 初回のみ軌跡全体が収まる俯瞰位置へ。2回目以降は前回の俯瞰位置を復元
+      // （cam モードは world.camera をベイク位置で上書きするため、復元しないと
+      //   俯瞰へ戻ったときにパス内部へ飛んでしまう）
       if (!this._orbitInitialized) {
         const { center, radius } = this._trajBounds();
         world.camera.fov = 45;
@@ -236,10 +239,21 @@ export class Timeline {
         );
         this.orbit.target.copy(center);
         this._orbitInitialized = true;
+      } else if (this._freeCamSnapshot) {
+        world.camera.position.copy(this._freeCamSnapshot.pos);
+        world.camera.fov = this._freeCamSnapshot.fov;
+        world.camera.updateProjectionMatrix();
+        this.orbit.target.copy(this._freeCamSnapshot.target);
       }
       this.orbit.enabled = true;
       this.orbit.update();
     } else {
+      // cam へ抜ける直前の俯瞰カメラ姿勢を保存（次に free へ戻すとき復元）
+      this._freeCamSnapshot = {
+        pos: world.camera.position.clone(),
+        fov: world.camera.fov,
+        target: this.orbit.target.clone(),
+      };
       this.orbit.enabled = false;
       this.helper.visible = false;
       this.lookLine.visible = false;
@@ -391,6 +405,7 @@ export class Timeline {
     this.ghost = null;
     this.viewMode = 'cam';
     this._orbitInitialized = false;
+    this._freeCamSnapshot = null;
     if (this.viewBtn) this.viewBtn.textContent = '視点: Camera';
   }
 
@@ -583,7 +598,11 @@ export class Timeline {
         marker.addEventListener('pointerdown', (e) => {
           e.stopPropagation();
           this._seek(m.frame);
-          if (m.editable) this.pathEditor.selectKeyframe(p.id, m.kf);
+          if (!m.editable) return;
+          // 定点ショットはショット選択、path はキーフレーム選択
+          const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === p.id);
+          if (shot?.type === 'static') this.pathEditor.selectShot(p.id);
+          else this.pathEditor.selectKeyframe(p.id, m.kf);
         });
         this.track.appendChild(marker);
       }

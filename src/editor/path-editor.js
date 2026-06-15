@@ -33,10 +33,8 @@ export class PathEditor {
     this.sel = { kind: 'anchor', side: null }; // 'anchor' | 'handle'(side) | 'aim'
 
     this.state = {
-      phaseId: this._phases()[0]?.id ?? '',
+      phaseId: this._phases()[0]?.id ?? '', // タイムライン/3Dクリックで切替（ドロップダウン無し）
       keyframe: 0,
-      manual: false,
-      lookOverride: false,
       preview: () => this._preview(),
       addKeyframe: () => this._addKeyframe(),
       removeKeyframe: () => this._removeKeyframe(),
@@ -65,22 +63,7 @@ export class PathEditor {
     this._onPointerDown = (e) => this._pick(e);
     ctx.world.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
 
-    this.phaseCtrl = this.gui
-      .add(this.state, 'phaseId', this._phases().map((p) => p.id))
-      .name('Phase')
-      .onChange(() => this.rebuild());
-    this.kfSelectCtrl = this.gui
-      .add(this.state, 'keyframe', [0])
-      .name('Edit keyframe')
-      .onChange(() => this._selectAnchor());
-    this.manualCtrl = this.gui
-      .add(this.state, 'manual')
-      .name('Bezier handles（選択KFを auto/manual）')
-      .onChange(() => this._toggleManual());
-    this.lookCtrl = this.gui
-      .add(this.state, 'lookOverride')
-      .name('look override（選択KFの注視点）')
-      .onChange(() => this._toggleLookOverride());
+    // フェーズ/キーフレームの選択はタイムラインの◆・3Dクリックで行う（ドロップダウンは廃止）
     this.gui.add(this.state, 'preview').name('▶ Preview phase（実時間再生）');
     this.gui.add(this.state, 'addKeyframe').name('+ keyframe（選択の直後に挿入）');
     this.gui.add(this.state, 'removeKeyframe').name('− keyframe（選択を削除）');
@@ -145,27 +128,8 @@ export class PathEditor {
     this.state.keyframe = editable.includes(this.state.keyframe) ? this.state.keyframe : editable[0] ?? 0;
     this.sel = { kind: 'anchor', side: null };
 
-    this.kfSelectCtrl = this.kfSelectCtrl
-      .options(editable.length ? editable : [0])
-      .name('Edit keyframe')
-      .onChange(() => this._selectAnchor());
-    this.kfSelectCtrl.updateDisplay();
-
     this._rebuildViz();
     this._buildKfPanel();
-    this._syncToggles();
-  }
-
-  /** 選択KFの状態に合わせて manual / lookOverride チェックを同期 */
-  _syncToggles() {
-    const entry = this._currentPhase()?.path[this.state.keyframe];
-    const isKf = entry && entry !== '@current';
-    this.state.manual = isKf ? this._isManual(entry) : false;
-    this.state.lookOverride = isKf ? this._hasLook(entry) : false;
-    this.manualCtrl?.updateDisplay();
-    this.manualCtrl?.enable(!!isKf);
-    this.lookCtrl?.updateDisplay();
-    this.lookCtrl?.enable(!!isKf);
   }
 
   /** path[i] のアンカー軸を書き込む（auto=配列 / object 両対応） */
@@ -184,8 +148,11 @@ export class PathEditor {
   }
 
   /**
-   * 選択中キーフレーム「1つだけ」の数値パネルを構築する。
-   * pos.x/y/z（manual なら handle in/out のデルタ、look override なら注視点 x/y/z）。
+   * 選択中キーフレーム「1つだけ」の編集パネルを構築する。
+   * キーフレーム単位の編集は3モード:
+   *   ① position … アンカー座標（赤球）
+   *   ② bezier handle … カーブの接線（青ハンドル。auto/manual トグル）
+   *   ③ look / aim … 注視点オーバーライド（緑ポインタ。on/off トグル）
    */
   _buildKfPanel() {
     this.kfFolder.destroy();
@@ -199,19 +166,24 @@ export class PathEditor {
     const entry = phase?.path[i];
     if (!entry) return;
 
-    this.kfFolder.add({ index: `#${i} / ${phase.path.length - 1}` }, 'index').name('index').disable();
+    this.kfFolder
+      .add({ kf: `${phase.id}  #${i}/${phase.path.length - 1}` }, 'kf')
+      .name('keyframe')
+      .disable();
 
     if (entry === '@current') {
       this.kfFolder.add({ info: '実行時カメラ位置（編集不可）' }, 'info').name('type').disable();
       return;
     }
 
+    // ① position（アンカー）
+    const posF = this.kfFolder.addFolder('① position（位置）');
     const pos = kfPos(entry);
     const posProxy = { x: pos.x, y: pos.y, z: pos.z };
     const posCtrls = ['x', 'y', 'z'].map((ax, ai) =>
-      this.kfFolder
+      posF
         .add(posProxy, ax, -20, 20, 0.01)
-        .name(`pos ${ax}`)
+        .name(ax)
         .onChange((v) => {
           this._setAnchor(i, ai, v);
           this._syncSphere(i);
@@ -223,15 +195,19 @@ export class PathEditor {
     );
     this.kfPanel = { index: i, posProxy, posCtrls };
 
-    if (this._isManual(entry)) {
+    // ② bezier handle（カーブの接線）
+    const manual = this._isManual(entry);
+    const bezF = this.kfFolder.addFolder('② bezier handle（曲線）');
+    bezF.add({ on: manual }, 'on').name('使う（auto ⇄ manual）').onChange((on) => this._setManual(on));
+    if (manual) {
       for (const side of ['out', 'in']) {
         const key = side === 'in' ? 'hIn' : 'hOut';
         const h = kfHandle(entry, key) ?? new THREE.Vector3();
         const proxy = { x: h.x, y: h.y, z: h.z };
-        const f = this.kfFolder.addFolder(side === 'in' ? 'handle in (Δ from pos)' : 'handle out (Δ from pos)');
         const ctrls = ['x', 'y', 'z'].map((ax, ai) =>
-          f.add(proxy, ax, -10, 10, 0.01)
-            .name(ax)
+          bezF
+            .add(proxy, ax, -10, 10, 0.01)
+            .name(`${side} ${ax}`)
             .onChange((v) => {
               this._setHandle(i, key, ai, v);
               this._redrawHandles();
@@ -243,13 +219,17 @@ export class PathEditor {
       }
     }
 
-    if (this._hasLook(entry)) {
+    // ③ look / aim（注視点オーバーライド）
+    const hasLook = this._hasLook(entry);
+    const lookF = this.kfFolder.addFolder('③ look / aim（向き）');
+    lookF.add({ on: hasLook }, 'on').name('注視点を上書き').onChange((on) => this._setLookOverride(on));
+    if (hasLook) {
       const lk = entry.look;
       const pr = { x: lk[0], y: lk[1], z: lk[2] };
       this.aimProxy = pr;
-      const f = this.kfFolder.addFolder('look（注視点・ワールド）');
       this.aimCtrls = ['x', 'y', 'z'].map((ax, ai) =>
-        f.add(pr, ax, -20, 20, 0.01)
+        lookF
+          .add(pr, ax, -20, 20, 0.01)
           .name(ax)
           .onChange((v) => {
             entry.look[ai] = Number(v.toFixed(3));
@@ -485,39 +465,37 @@ export class PathEditor {
       this.sel = { kind: 'aim' };
       this._attachGizmo();
     } else {
-      this.kfSelectCtrl.setValue(ud.kfIndex); // onChange → _selectAnchor
+      this.state.keyframe = ud.kfIndex;
+      this._selectAnchor();
     }
   }
 
-  /** Edit keyframe ドロップダウン or アンカークリック時 */
+  /** キーフレーム選択時（3Dクリック / タイムライン◆ / phase切替後） */
   _selectAnchor() {
     this.sel = { kind: 'anchor', side: null };
     this._rebuildHandles();
     this._rebuildAim();
     this._attachGizmo();
     this._buildKfPanel();
-    this._syncToggles();
   }
 
-  /** 外部（タイムラインの◆クリック等）からの選択 */
+  /** 外部（タイムラインの◆クリック・3Dクリック等）からの選択。phase もここで切替 */
   selectKeyframe(phaseId, kfIndex) {
-    if (this.state.phaseId !== phaseId) {
-      if (!this._phases().some((p) => p.id === phaseId)) return;
-      this.phaseCtrl.setValue(phaseId);
-    }
-    this.kfSelectCtrl.setValue(kfIndex);
+    if (!this._phases().some((p) => p.id === phaseId)) return;
+    const phaseChanged = this.state.phaseId !== phaseId;
+    this.state.phaseId = phaseId;
+    this.state.keyframe = kfIndex;
+    this.sel = { kind: 'anchor', side: null };
+    if (phaseChanged) this.rebuild();
+    else this._selectAnchor();
   }
 
   /** 選択キーフレームの auto ⇄ manual を切替 */
-  _toggleManual() {
+  _setManual(wantManual) {
     const phase = this._currentPhase();
     const i = this.state.keyframe;
     const entry = phase.path[i];
-    if (!entry || entry === '@current') {
-      this._syncToggles();
-      return;
-    }
-    const wantManual = this.state.manual;
+    if (!entry || entry === '@current') return;
     if (wantManual === this._isManual(entry)) return;
 
     if (wantManual) {
@@ -537,20 +515,15 @@ export class PathEditor {
     this._rebuildLine();
     this._attachGizmo();
     this._buildKfPanel();
-    this._syncToggles();
     this.onChanged?.();
   }
 
   /** 選択キーフレームの look override を切替 */
-  _toggleLookOverride() {
+  _setLookOverride(want) {
     const phase = this._currentPhase();
     const i = this.state.keyframe;
     const entry = phase.path[i];
-    if (!entry || entry === '@current') {
-      this._syncToggles();
-      return;
-    }
-    const want = this.state.lookOverride;
+    if (!entry || entry === '@current') return;
     if (want === this._hasLook(entry)) return;
 
     if (want) {
@@ -566,7 +539,6 @@ export class PathEditor {
     this._rebuildAim();
     this._attachGizmo();
     this._buildKfPanel();
-    this._syncToggles();
     this.onChanged?.();
   }
 

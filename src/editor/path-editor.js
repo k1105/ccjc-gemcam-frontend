@@ -163,9 +163,25 @@ export class PathEditor {
     return !!(entry && entry !== '@current' && !Array.isArray(entry) && Array.isArray(entry.look));
   }
 
-  /** フェーズ既定 lookAt の点（look override 初期値） */
+  /**
+   * look override をONにした時の初期注視点。
+   * 「そのキーフレーム時点で実際に見ている点」＝ベイク済み注視点を初期値にする
+   * （ON にした瞬間に向きが飛ばない）。タイムライン未起動時はフェーズ既定 lookAt。
+   */
   _defaultAimPoint() {
-    const lc = this._currentPhase()?.lookAt;
+    const phase = this._currentPhase();
+    const tl = this.timeline;
+    if (tl?.isOpen && tl.baked && phase) {
+      const info = tl.baked.shots.find((s) => s.id === phase.id && s.layer !== 'overlay');
+      const m = info?.markers?.find((mk) => mk.kf === this.state.keyframe);
+      if (m) {
+        const F = Math.max(0, Math.min(m.frame, tl.baked.totalFrames - 1));
+        return [tl.baked.look[F * 3], tl.baked.look[F * 3 + 1], tl.baked.look[F * 3 + 2]].map((v) =>
+          Number(v.toFixed(3))
+        );
+      }
+    }
+    const lc = phase?.lookAt;
     const p = Array.isArray(lc?.point) ? lc.point : [0, 0.5, 0];
     return p.map((v) => Number(v.toFixed(3)));
   }

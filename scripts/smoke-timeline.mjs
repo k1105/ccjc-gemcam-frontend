@@ -289,6 +289,23 @@ assert(kfRes.len === kfPre.before + 1, `アンカーが1つ追加 (${kfPre.befor
 assert(kfRes.sel === 'heroFollow', `playhead のショットが選択された (${kfRes.sel})`);
 assert(kfRes.dist < 0.05, `追加アンカーがシークバー位置(曲線上)に一致 (Δ=${kfRes.dist.toFixed(4)})`);
 
+console.log('--- look override starts at current aim (not far default) ---');
+const lo = await page.evaluate(() => {
+  const pe = window.app.editor.pathEditor;
+  const tl = window.app.editor.timeline;
+  pe.selectKeyframe('heroFollow', 1);
+  const info = tl.baked.shots.find((s) => s.id === 'heroFollow');
+  const F = info.markers.find((mk) => mk.kf === 1).frame;
+  const baked = [tl.baked.look[F * 3], tl.baked.look[F * 3 + 1], tl.baked.look[F * 3 + 2]];
+  pe._setLookOverride(true);
+  const entry = window.app.ctx.choreo.data.generate.shots.find((s) => s.id === 'heroFollow').path[1];
+  return { baked, look: Array.isArray(entry) ? null : entry.look };
+});
+assert(
+  lo.look && Math.hypot(lo.look[0] - lo.baked[0], lo.look[1] - lo.baked[1], lo.look[2] - lo.baked[2]) < 0.05,
+  `look override 初期値が現在の注視点に一致 (${lo.look} vs ${lo.baked.map((v) => +v.toFixed(2))})`
+);
+
 console.log('--- close (Esc): camera restore + resource release');
 await page.keyboard.press('Escape');
 await page.waitForFunction(() => !window.app.editor.timeline.isOpen);

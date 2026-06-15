@@ -325,6 +325,43 @@ const sdrag = await page.evaluate(() => {
 assert(Math.abs(sdrag.after - sdrag.before) > 0.5, `p1 ドラッグで streamP1Offset 更新 (${sdrag.before} -> ${sdrag.after})`);
 assert(Math.abs(sdrag.p1moved - 0.6) < 1e-3, `live stream(uniform 参照)が即同期 (Δ=${sdrag.p1moved.toFixed(3)})`);
 
+console.log('--- place / drag / remove light (Phase6) ---');
+const lcount0 = await page.evaluate(
+  () => window.app.ctx.world.scene.children.filter((o) => o.isLight).length
+);
+await page.evaluate(() => window.app.editor.pathEditor._addLight('point'));
+await page.waitForTimeout(300);
+const ladd = await page.evaluate(() => ({
+  cfg: window.app.ctx.choreo.data.generate.lights.length,
+  sceneLights: window.app.ctx.world.scene.children.filter((o) => o.isLight).length,
+  marker: window.app.editor.pathEditor.lightMarkers.length,
+}));
+assert(ladd.cfg === 1, `lights config に1追加 (${ladd.cfg})`);
+assert(ladd.sceneLights === lcount0 + 1, `プレビューシーンにライト追加 (${lcount0} -> ${ladd.sceneLights})`);
+assert(ladd.marker === 1, `配置マーカー表示 (${ladd.marker})`);
+const ldrag = await page.evaluate(() => {
+  const pe = window.app.editor.pathEditor;
+  const before = window.app.ctx.choreo.data.generate.lights[0].pos[0];
+  pe.tc.attach(pe.lightMarkers[0]);
+  pe.lightMarkers[0].position.x += 1.5;
+  pe._onGizmoChange();
+  return {
+    before,
+    after: window.app.ctx.choreo.data.generate.lights[0].pos[0],
+    sceneX: window.app.ctx.world.scene.children.find((o) => o.isPointLight).position.x,
+  };
+});
+assert(Math.abs(ldrag.after - ldrag.before) > 1, `ドラッグで pos 更新 (${ldrag.before} -> ${ldrag.after})`);
+assert(Math.abs(ldrag.sceneX - ldrag.after) < 1e-3, `実ライトが追従 (sceneX=${ldrag.sceneX})`);
+await page.evaluate(() => window.app.editor.pathEditor._removeLight());
+await page.waitForTimeout(300);
+const lrem = await page.evaluate(() => ({
+  cfg: window.app.ctx.choreo.data.generate.lights.length,
+  sceneLights: window.app.ctx.world.scene.children.filter((o) => o.isLight).length,
+}));
+assert(lrem.cfg === 0, `削除で config 0 (${lrem.cfg})`);
+assert(lrem.sceneLights === lcount0, `プレビューからも削除 (${lrem.sceneLights})`);
+
 console.log('--- close (Esc): camera restore + resource release');
 await page.keyboard.press('Escape');
 await page.waitForFunction(() => !window.app.editor.timeline.isOpen);

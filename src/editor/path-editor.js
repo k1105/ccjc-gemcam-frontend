@@ -11,6 +11,7 @@ const HANDLE_COLOR = 0x46d3ff;
 const AIM_COLOR = 0x7cffb0; // 注視点(look)オーバーライド
 const STATIC_COLOR = 0xffa040; // 定点(static)ショットの位置マーカー
 const STREAM_COLOR = 0xff5cc8; // 粒子ストリームのベジェ制御点(p1/p2)
+const LIGHT_COLOR = 0xffcc33; // ライト配置マーカー（アンバー）
 
 /**
  * generate.shots を 3Dビューポート上で編集するショットエディタ。
@@ -47,6 +48,7 @@ export class PathEditor {
       phaseId: this._shots()[0]?.id ?? '', // 選択中ショット。タイムライン◆/管理ボタンで切替
       keyframe: 0,
       aimKey: 0, // 定点のパン（注視点キーフレーム）の編集対象index
+      lightId: '', // 選択中の配置ライト
       preview: () => this._preview(),
       addKeyframe: () => this._addKeyframe(),
       removeKeyframe: () => this._removeKeyframe(),
@@ -74,6 +76,11 @@ export class PathEditor {
     this.streamP2Sphere = null;
     this.streamLine = null;
     this.streamMarks = []; // p0/p3 参照マーカー
+    // 配置ライト（generate.lights）
+    this.lightMarkers = []; // 各ライトの位置マーカー
+    this.lightTargetMarker = null; // 選択中 spot/directional の target
+    this.lightLine = null; // 位置→target 線
+    this.lightPanel = null;
 
     this.tc = new TransformControls(ctx.world.camera, ctx.world.renderer.domElement);
     this.tcHelper = this.tc.getHelper();
@@ -105,6 +112,21 @@ export class PathEditor {
     this.shotsFolder.add(acts, 'remove').name('🗑 ショット削除');
 
     this.kfFolder = this.gui.addFolder('Selected shot');
+
+    // 配置ライト（generate.lights）: 種別を選んで追加、ビューポートで位置 gizmo 編集
+    this.lightsFolder = this.gui.addFolder('Lights（配置）');
+    const lacts = {
+      addPoint: () => this._addLight('point'),
+      addSpot: () => this._addLight('spot'),
+      addDir: () => this._addLight('directional'),
+      remove: () => this._removeLight(),
+    };
+    this.lightsFolder.add(lacts, 'addPoint').name('＋ point');
+    this.lightsFolder.add(lacts, 'addSpot').name('＋ spot');
+    this.lightsFolder.add(lacts, 'addDir').name('＋ directional');
+    this.lightsFolder.add(lacts, 'remove').name('🗑 ライト削除');
+    this.lightFolder = this.gui.addFolder('Selected light');
+
     this.rebuild();
   }
 
@@ -225,8 +247,9 @@ export class PathEditor {
       this._rebuildViz();
       this._buildKfPanel();
     }
-    // 粒子ストリームのハンドルはショット選択に依存せず常に表示（particles があれば）
+    // 粒子ストリームのハンドル・配置ライトはショット選択に依存せず常に表示
     this._rebuildStreamViz();
+    this._rebuildLightViz();
   }
 
   /** path 系ビューポート要素（アンカー/線/ハンドル/aim）を全消去 */
@@ -863,6 +886,218 @@ export class PathEditor {
     this.streamLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
   }
 
+  // ---- 配置ライト（generate.lights）----
+
+  _lights() {
+    const g = this.ctx.choreo.data.generate;
+    if (!Array.isArray(g.lights)) g.lights = [];
+    return g.lights;
+  }
+
+  _currentLight() {
+    return this._lights().find((l) => l.id === this.state.lightId);
+  }
+
+  _uniqueLightId(base) {
+    const ids = new Set(this._lights().map((l) => l.id));
+    let n = 1;
+    while (ids.has(`${base}-${n}`)) n++;
+    return `${base}-${n}`;
+  }
+
+  /** ライト変更をプレビューへ反映＋undo通知（ビューポート再構築なし） */
+  _lightChanged() {
+    this.timeline?.stage?.syncLights?.();
+    this.onChanged?.();
+  }
+
+  _disposeLightViz() {
+    if (
+      this.tc.object &&
+      (this.lightMarkers.includes(this.tc.object) || this.tc.object === this.lightTargetMarker)
+    ) {
+      this.tc.detach();
+      this.tcHelper.visible = false;
+    }
+    for (const m of this.lightMarkers) {
+      this.viz.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+    }
+    this.lightMarkers = [];
+    for (const k of ['lightTargetMarker', 'lightLine']) {
+      const o = this[k];
+      if (!o) continue;
+      this.viz.remove(o);
+      o.geometry.dispose();
+      o.material.dispose();
+      this[k] = null;
+    }
+  }
+
+  /** 全ライトの位置マーカー（選択は強調）＋選択 spot/directional の target/線を再構築 */
+  _rebuildLightViz() {
+    this._disposeLightViz();
+    if (!this.active) return;
+    const lights = this._lights();
+    for (const lt of lights) {
+      const sel = lt.id === this.state.lightId;
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(sel ? 0.12 : 0.09, 14, 10),
+        new THREE.MeshBasicMaterial({
+          color: sel ? SELECTED_COLOR : LIGHT_COLOR,
+          depthTest: false,
+          transparent: true,
+        })
+      );
+      m.renderOrder = 1000;
+      m.position.set(lt.pos[0], lt.pos[1], lt.pos[2]);
+      m.userData = { kind: 'light-pos', id: lt.id };
+      this.viz.add(m);
+      this.lightMarkers.push(m);
+    }
+    const cur = this._currentLight();
+    if (cur && (cur.type === 'spot' || cur.type === 'directional') && Array.isArray(cur.target)) {
+      this.lightTargetMarker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.06, 12, 10),
+        new THREE.MeshBasicMaterial({ color: LIGHT_COLOR, depthTest: false, transparent: true })
+      );
+      this.lightTargetMarker.renderOrder = 1000;
+      this.lightTargetMarker.position.set(cur.target[0], cur.target[1], cur.target[2]);
+      this.lightTargetMarker.userData = { kind: 'light-target', id: cur.id };
+      this.viz.add(this.lightTargetMarker);
+      this.lightLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(...cur.pos),
+          new THREE.Vector3(...cur.target),
+        ]),
+        new THREE.LineBasicMaterial({ color: LIGHT_COLOR, depthTest: false, transparent: true, opacity: 0.5 })
+      );
+      this.lightLine.renderOrder = 999;
+      this.viz.add(this.lightLine);
+    }
+    // ライト選択中ならギズモを対象マーカーへ
+    if (this.sel.kind === 'light-pos' && cur) {
+      const m = this.lightMarkers.find((x) => x.userData.id === cur.id);
+      if (m && this.active) {
+        this.tc.attach(m);
+        this.tcHelper.visible = true;
+      }
+    } else if (this.sel.kind === 'light-target' && this.lightTargetMarker && this.active) {
+      this.tc.attach(this.lightTargetMarker);
+      this.tcHelper.visible = true;
+    }
+  }
+
+  _redrawLightLine() {
+    const cur = this._currentLight();
+    if (!this.lightLine || !cur || !Array.isArray(cur.target)) return;
+    this.lightLine.geometry.dispose();
+    this.lightLine.geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...cur.pos),
+      new THREE.Vector3(...cur.target),
+    ]);
+  }
+
+  /** 選択ライトの編集パネル（種別/色/強度/位置/距離/コーン/target） */
+  _buildLightPanel() {
+    this.lightFolder.destroy();
+    this.lightFolder = this.gui.addFolder('Selected light');
+    this.lightPanel = null;
+    const lt = this._currentLight();
+    if (!lt) return;
+    this.lightFolder.add({ t: `${lt.id}（${lt.type}）` }, 't').name('light').disable();
+    this.lightFolder.addColor(lt, 'color').name('色').onChange(() => this._lightChanged());
+    this._freeRange(this.lightFolder.add(lt, 'intensity', 0, 50, 0.1))
+      .name('強度')
+      .onChange(() => this._lightChanged());
+
+    const posF = this.lightFolder.addFolder('位置');
+    const posProxy = { x: lt.pos[0], y: lt.pos[1], z: lt.pos[2] };
+    const posCtrls = ['x', 'y', 'z'].map((ax, ai) =>
+      posF
+        .add(posProxy, ax, -20, 20, 0.01)
+        .name(ax)
+        .onChange((v) => {
+          lt.pos[ai] = Number(v.toFixed(3));
+          const m = this.lightMarkers.find((x) => x.userData.id === lt.id);
+          if (m) m.position.set(lt.pos[0], lt.pos[1], lt.pos[2]);
+          this._redrawLightLine();
+          this._lightChanged();
+        })
+    );
+
+    if (lt.type !== 'directional') {
+      this.lightFolder.add(lt, 'distance', 0, 50, 0.1).name('distance(0=無限)').onChange(() => this._lightChanged());
+      this.lightFolder.add(lt, 'decay', 0, 4, 0.1).name('decay').onChange(() => this._lightChanged());
+    }
+    if (lt.type === 'spot') {
+      this.lightFolder.add(lt, 'angle', 0.05, 1.4, 0.01).name('コーン角').onChange(() => this._lightChanged());
+      this.lightFolder.add(lt, 'penumbra', 0, 1, 0.01).name('penumbra').onChange(() => this._lightChanged());
+    }
+    if ((lt.type === 'spot' || lt.type === 'directional') && Array.isArray(lt.target)) {
+      const tF = this.lightFolder.addFolder('target（向き先）');
+      ['x', 'y', 'z'].map((ax, ai) =>
+        tF
+          .add(lt.target, ai, -20, 20, 0.01)
+          .name(ax)
+          .onChange(() => {
+            if (this.lightTargetMarker) this.lightTargetMarker.position.set(...lt.target);
+            this._redrawLightLine();
+            this._lightChanged();
+          })
+      );
+    }
+    this.lightPanel = { posProxy, posCtrls };
+  }
+
+  _addLight(type) {
+    const lights = this._lights();
+    const id = this._uniqueLightId(type);
+    const lt = {
+      id,
+      type,
+      pos: [0, 3, 1],
+      color: '#ffffff',
+      intensity: type === 'directional' ? 1.5 : 15,
+    };
+    if (type !== 'directional') {
+      lt.distance = 0;
+      lt.decay = 2;
+    }
+    if (type === 'spot' || type === 'directional') lt.target = [0, 0.5, 0];
+    if (type === 'spot') {
+      lt.angle = 0.6;
+      lt.penumbra = 0.3;
+    }
+    lights.push(lt);
+    this.state.lightId = id;
+    this.sel = { kind: 'light-pos', side: null };
+    this._rebuildLightViz();
+    this._buildLightPanel();
+    this._lightChanged();
+  }
+
+  _removeLight() {
+    const lights = this._lights();
+    const i = lights.findIndex((l) => l.id === this.state.lightId);
+    if (i < 0) return;
+    lights.splice(i, 1);
+    this.state.lightId = lights[Math.max(0, i - 1)]?.id ?? '';
+    this.sel = { kind: 'anchor', side: null };
+    this._rebuildLightViz();
+    this._buildLightPanel();
+    this._lightChanged();
+  }
+
+  /** ビューポート/外部からライト選択 */
+  _selectLight(id) {
+    this.state.lightId = id;
+    this.sel = { kind: 'light-pos', side: null };
+    this._rebuildLightViz();
+    this._buildLightPanel();
+  }
+
   // ---- ショット管理（追加 / 削除 / 並べ替え / 選択） ----
 
   _uniqueId(base) {
@@ -1167,6 +1402,8 @@ export class PathEditor {
       ...(this.staticPosSphere ? [this.staticPosSphere] : []),
       ...(this.streamP1Sphere ? [this.streamP1Sphere] : []),
       ...(this.streamP2Sphere ? [this.streamP2Sphere] : []),
+      ...this.lightMarkers,
+      ...(this.lightTargetMarker ? [this.lightTargetMarker] : []),
       ...this.spheres,
     ];
     if (!targets.length) return;
@@ -1179,7 +1416,15 @@ export class PathEditor {
     const hits = this.raycaster.intersectObjects(targets, false);
     if (!hits.length) return;
     const ud = hits[0].object.userData;
-    if (ud.kind === 'stream-p1' || ud.kind === 'stream-p2') {
+    if (ud.kind === 'light-pos') {
+      this._selectLight(ud.id); // ライト選択（gizmo は light-pos へ）
+    } else if (ud.kind === 'light-target') {
+      this.sel = { kind: 'light-target', side: null };
+      if (this.lightTargetMarker) {
+        this.tc.attach(this.lightTargetMarker);
+        this.tcHelper.visible = true;
+      }
+    } else if (ud.kind === 'stream-p1' || ud.kind === 'stream-p2') {
       this.sel = { kind: ud.kind, side: null };
       const obj = ud.kind === 'stream-p1' ? this.streamP1Sphere : this.streamP2Sphere;
       if (obj) {
@@ -1293,6 +1538,22 @@ export class PathEditor {
     if (!obj) return;
     const ud = obj.userData;
 
+    if (ud.kind === 'light-pos' || ud.kind === 'light-target') {
+      const lt = this._lights().find((l) => l.id === ud.id);
+      if (!lt) return;
+      const arr = ud.kind === 'light-pos' ? lt.pos : lt.target;
+      if (!arr) return;
+      arr[0] = Number(obj.position.x.toFixed(3));
+      arr[1] = Number(obj.position.y.toFixed(3));
+      arr[2] = Number(obj.position.z.toFixed(3));
+      this._redrawLightLine();
+      if (ud.kind === 'light-pos' && this.lightPanel?.posProxy) {
+        [this.lightPanel.posProxy.x, this.lightPanel.posProxy.y, this.lightPanel.posProxy.z] = lt.pos;
+        this.lightPanel.posCtrls.forEach((c) => c.updateDisplay());
+      }
+      this._lightChanged();
+      return;
+    }
     if (ud.kind === 'stream-p1' || ud.kind === 'stream-p2') {
       const s = this._particles()?._stream;
       if (!s) return;
@@ -1556,5 +1817,6 @@ export class PathEditor {
     }
     this._disposeStatic();
     this._disposeStream();
+    this._disposeLightViz();
   }
 }

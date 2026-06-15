@@ -41,6 +41,7 @@
     "photoDistance": 2.2,
     "bottlePos": [10, 0.4, -6],
     "bottleScale": 1.6,
+    "lights": [],
     "shots": [
       {
         "id": "photoRecede",

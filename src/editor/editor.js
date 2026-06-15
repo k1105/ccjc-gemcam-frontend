@@ -67,7 +67,7 @@ export class Editor {
     // uniform に焼かれるため scene:true（プレビューの粒を再構築）
     const gen = tune.addFolder('generate');
     buildGuiFromObject(gen, choreo.data.generate, {
-      skipKeys: ['path', 'particles', 'times'], // パス/時刻は PathEditor で編集
+      skipKeys: ['path', 'particles', 'times', 'lights'], // パス/時刻/ライトは PathEditor で編集
       onChange: () => {
         this.timeline.invalidate();
         touch();

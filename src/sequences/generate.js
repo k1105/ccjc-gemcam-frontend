@@ -3,6 +3,7 @@ import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag, disposeObject3D } from '../core/resources.js';
 import { PhotoParticles } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
+import { LightRig } from '../core/light-rig.js';
 
 /**
  * GENERATE: 撮影写真が3D平面としてカメラから遠ざかり、パーティクルに分解されて
@@ -24,6 +25,10 @@ export class GenerateSequence extends Sequence {
     const gcfg = choreo.data.generate;
     bottleRack.setVisible(false);
     overlay.hideAll();
+
+    // 配置ライト（generate.lights）をシーンへ反映
+    this.lightRig = new LightRig(world.scene);
+    this.lightRig.sync(gcfg.lights ?? []);
 
     // --- カメラを最初の base ショット開始位置へ即時セット（DOM白フラッシュ中） ---
     const ph0 = gcfg.shots.find((s) => s.type !== 'static') ?? gcfg.shots[0];
@@ -174,6 +179,11 @@ export class GenerateSequence extends Sequence {
     director.stop();
     director.clearTargets();
     this.bag.disposeAll();
+
+    if (this.lightRig) {
+      this.lightRig.dispose();
+      this.lightRig = null;
+    }
 
     if (this.plane) {
       world.scene.remove(this.plane);

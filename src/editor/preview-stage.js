@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PhotoParticles } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
 import { disposeObject3D } from '../core/resources.js';
+import { LightRig } from '../core/light-rig.js';
 
 /**
  * タイムラインプレビュー用のサンドボックス generate シーン。
@@ -62,8 +63,18 @@ export class PreviewStage {
     );
 
     this._buildParticles();
+
+    // 配置ライト（generate.lights）をプレビューシーンへ反映（本番と同じ LightRig）
+    this.lightRig = new LightRig(world.scene);
+    this.lightRig.sync(gcfg.lights ?? []);
+
     await this.setBrand(brand);
     this.opened = true;
+  }
+
+  /** ライト編集後の再反映（PathEditor から呼ぶ） */
+  syncLights() {
+    this.lightRig?.sync(this.ctx.choreo.data.generate.lights ?? []);
   }
 
   _buildParticles() {
@@ -142,6 +153,10 @@ export class PreviewStage {
     if (this.particles) {
       this.particles.dispose(world.scene);
       this.particles = null;
+    }
+    if (this.lightRig) {
+      this.lightRig.dispose();
+      this.lightRig = null;
     }
     if (this.bottle) {
       disposeObject3D(this.bottle);

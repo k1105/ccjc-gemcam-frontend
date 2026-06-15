@@ -29,8 +29,11 @@ export class Editor {
     this.gui = new GUI({ title: 'CCJC Choreography Editor', width: 330 });
     this.gui.domElement.style.position = 'fixed';
     this.gui.domElement.style.top = '12px';
-    this.gui.domElement.style.right = '12px';
+    this.gui.domElement.style.left = '12px'; // 画面左へ
     this.gui.domElement.style.zIndex = '1000';
+    // 縦に収まらない時はパネル内スクロール（タイムライン上に被らない）
+    this.gui.domElement.style.maxHeight = 'calc(100vh - 24px)';
+    this.gui.domElement.style.overflowY = 'auto';
     this.gui.hide();
 
     const { choreo, manager, bottleRack } = this.ctx;

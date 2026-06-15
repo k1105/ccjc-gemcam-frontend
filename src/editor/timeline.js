@@ -791,7 +791,7 @@ function injectStyles() {
   style.id = 'tlx-style';
   style.textContent = `
 #tlx-panel {
-  position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 1001;
+  position: fixed; left: 354px; right: 12px; bottom: 12px; z-index: 1001;
   background: rgba(18, 18, 22, 0.92); color: #e8e8ee;
   border: 1px solid #3a3a44; border-radius: 8px;
   font: 12px/1.4 'SF Mono', Menlo, Consolas, monospace;

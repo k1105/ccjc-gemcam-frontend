@@ -81,6 +81,7 @@ export class PathEditor {
     this.lightTargetMarker = null; // 選択中 spot/directional の target
     this.lightLine = null; // 位置→target 線
     this.lightPanel = null;
+    this.lightListFolder = null; // ライト一覧（選択用）
 
     this.tc = new TransformControls(ctx.world.camera, ctx.world.renderer.domElement);
     this.tcHelper = this.tc.getHelper();
@@ -250,6 +251,7 @@ export class PathEditor {
     // 粒子ストリームのハンドル・配置ライトはショット選択に依存せず常に表示
     this._rebuildStreamViz();
     this._rebuildLightViz();
+    this._buildLightList();
   }
 
   /** path 系ビューポート要素（アンカー/線/ハンドル/aim）を全消去 */
@@ -1006,7 +1008,11 @@ export class PathEditor {
     this.lightPanel = null;
     const lt = this._currentLight();
     if (!lt) return;
-    this.lightFolder.add({ t: `${lt.id}（${lt.type}）` }, 't').name('light').disable();
+    this.lightFolder.add({ t: lt.id }, 't').name('light').disable();
+    this.lightFolder
+      .add({ type: lt.type }, 'type', ['point', 'spot', 'directional'])
+      .name('種別')
+      .onChange((m) => this._setLightType(m));
     this.lightFolder.addColor(lt, 'color').name('色').onChange(() => this._lightChanged());
     this._freeRange(this.lightFolder.add(lt, 'intensity', 0, 50, 0.1))
       .name('強度')
@@ -1051,6 +1057,45 @@ export class PathEditor {
     this.lightPanel = { posProxy, posCtrls };
   }
 
+  /** シーン内のライトをスタック表示して選択するパネルを再構築 */
+  _buildLightList() {
+    if (this.lightListFolder) this.lightListFolder.destroy();
+    this.lightListFolder = this.lightsFolder.addFolder('一覧（クリックで選択）');
+    const lights = this._lights();
+    if (!lights.length) {
+      this.lightListFolder.add({ i: '（なし）' }, 'i').name('lights').disable();
+      return;
+    }
+    for (const lt of lights) {
+      const selected = lt.id === this.state.lightId;
+      this.lightListFolder
+        .add({ sel: () => this._selectLight(lt.id) }, 'sel')
+        .name(`${selected ? '● ' : '○ '}${lt.id}（${lt.type}）`);
+    }
+  }
+
+  /** 選択ライトの種別を変更（必要フィールドを補完。LightRig が再生成で対応） */
+  _setLightType(newType) {
+    const lt = this._currentLight();
+    if (!lt || lt.type === newType) return;
+    lt.type = newType;
+    if (newType !== 'directional') {
+      lt.distance = lt.distance ?? 0;
+      lt.decay = lt.decay ?? 2;
+    }
+    if ((newType === 'spot' || newType === 'directional') && !Array.isArray(lt.target)) {
+      lt.target = [0, 0.5, 0];
+    }
+    if (newType === 'spot') {
+      lt.angle = lt.angle ?? 0.6;
+      lt.penumbra = lt.penumbra ?? 0.3;
+    }
+    this._rebuildLightViz();
+    this._buildLightPanel();
+    this._buildLightList();
+    this._lightChanged();
+  }
+
   _addLight(type) {
     const lights = this._lights();
     const id = this._uniqueLightId(type);
@@ -1075,6 +1120,7 @@ export class PathEditor {
     this.sel = { kind: 'light-pos', side: null };
     this._rebuildLightViz();
     this._buildLightPanel();
+    this._buildLightList();
     this._lightChanged();
   }
 
@@ -1087,15 +1133,17 @@ export class PathEditor {
     this.sel = { kind: 'anchor', side: null };
     this._rebuildLightViz();
     this._buildLightPanel();
+    this._buildLightList();
     this._lightChanged();
   }
 
-  /** ビューポート/外部からライト選択 */
+  /** ビューポート/一覧からライト選択 */
   _selectLight(id) {
     this.state.lightId = id;
     this.sel = { kind: 'light-pos', side: null };
     this._rebuildLightViz();
     this._buildLightPanel();
+    this._buildLightList();
   }
 
   // ---- ショット管理（追加 / 削除 / 並べ替え / 選択） ----

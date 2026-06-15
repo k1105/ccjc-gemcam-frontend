@@ -17,7 +17,7 @@ import {
 } from '../core/camera-eval.js';
 
 /**
- * generate.phases のカメラ編成を 1/60 秒固定ステップで決定論シミュレートし、
+ * generate.shots のカメラ編成（ショット列）を 1/60 秒固定ステップで決定論シミュレートし、
  * 全フレームのカメラ状態（位置 / 注視点 / fov）を配列にベイクする。
  * タイムラインエディタのフレーム単位スクラブはこのベイク結果を再生するだけなので、
  * どこへシークしても本番再生と同一の絵になる（lookAt の lerp 平滑化も
@@ -52,7 +52,7 @@ const UP = new THREE.Vector3(0, 1, 0);
  * @returns {{
  *   fps: number, totalFrames: number, swapTime: number|null,
  *   pos: Float32Array, look: Float32Array, fov: Float32Array,
- *   phases: Array<{id, type, startFrame, frameCount, holdSec, markers: Array<{kf, frame, editable}>}>
+ *   shots: Array<{id, type, startFrame, frameCount, holdSec, markers: Array<{kf, frame, editable}>}>
  * }}
  */
 export function bakeGenerateCamera(gcfg, env) {
@@ -61,8 +61,8 @@ export function bakeGenerateCamera(gcfg, env) {
     new THREE.Vector3(0, 0.4 * bottleScale, 0)
   );
 
-  // --- generate.enter 鏡像: phase0 開始位置へ即時セット ---
-  const ph0 = gcfg.phases[0];
+  // --- generate.enter 鏡像: shot0 開始位置へ即時セット ---
+  const ph0 = gcfg.shots[0];
   const ph0Look =
     ph0.lookAt?.point ?? ph0.lookAt?.keys?.find((k) => Array.isArray(k.point))?.point ?? [0, 0.5, 0];
   const state = {
@@ -73,9 +73,13 @@ export function bakeGenerateCamera(gcfg, env) {
     time: 0,
     swapTime: null, // photoRecede 終了 = パーティクル開始時刻
   };
-  const ph0Start = ph0.path?.[0];
+  const ph0Start = ph0.type === 'static' ? ph0.pos : ph0.path?.[0];
   if (Array.isArray(ph0Start)) state.pos.set(...ph0Start);
   else if (ph0Start && ph0Start !== '@current') state.pos.set(...ph0Start.p);
+
+  // 向き平滑化の初期化フラグ（cut:true ショット開始時に false へ → 初回 snap）。
+  // 既存ショットは常に true のままなので従来挙動とビット一致する。
+  const lookInit = { initialized: true, onInit: () => (lookInit.initialized = true) };
 
   const posArr = [];
   const lookArr = [];
@@ -103,7 +107,7 @@ export function bakeGenerateCamera(gcfg, env) {
       if (hasFreeOrientation(keys)) {
         const q = sampleOrientationQuat(keys, uLin, resolveTarget, state.pos, _q);
         if (q) {
-          smoothQuat(state.quat, q, lookCfg.lerp, dt);
+          smoothQuat(state.quat, q, lookCfg.lerp, dt, lookInit);
           _fwd.set(0, 0, -1).applyQuaternion(state.quat);
           state.lookCurrent.copy(state.pos).addScaledVector(_fwd, 2);
           return state.quat;
@@ -111,12 +115,12 @@ export function bakeGenerateCamera(gcfg, env) {
         return null;
       }
       const pt = sampleAimPoint(keys, uLin, resolveTarget, _aim);
-      if (pt) smoothToPoint(state.lookCurrent, pt, lookCfg.lerp, dt);
+      if (pt) smoothToPoint(state.lookCurrent, pt, lookCfg.lerp, dt, lookInit);
     } else if (aimKeys) {
       const pt = sampleAimPoint(aimKeys, posParam, resolveTarget, _aim);
-      if (pt) smoothToPoint(state.lookCurrent, pt, lookCfg?.lerp, dt);
+      if (pt) smoothToPoint(state.lookCurrent, pt, lookCfg?.lerp, dt, lookInit);
     } else {
-      applyLook(lookCfg, dt, state.lookCurrent, resolveTarget);
+      applyLook(lookCfg, dt, state.lookCurrent, resolveTarget, lookInit);
     }
     return null;
   };
@@ -144,12 +148,19 @@ export function bakeGenerateCamera(gcfg, env) {
 
   record(); // frame 0 = 初期状態
 
-  for (const phase of gcfg.phases) {
-    const startFrame = posArr.length / 3 - 1; // このフェーズの開始＝直前フレーム
+  for (const phase of gcfg.shots) {
+    const startFrame = posArr.length / 3 - 1; // このショットの開始＝直前フレーム
     const info = { id: phase.id, type: phase.type, startFrame, frameCount: 0, holdSec: 0, markers: [] };
+
+    // cut:true（path/static のハードカット）は向きを開始時 snap させる
+    if (phase.cut && (phase.type === 'path' || phase.type === 'static')) {
+      lookInit.initialized = false;
+    }
 
     if (phase.type === 'path') {
       stepPath(phase, info);
+    } else if (phase.type === 'static') {
+      stepStatic(phase, info);
     } else if (phase.type === 'follow') {
       stepFollow(phase, info);
     } else if (phase.type === 'loop') {
@@ -173,7 +184,7 @@ export function bakeGenerateCamera(gcfg, env) {
     look: new Float32Array(lookArr),
     fov: new Float32Array(fovArr),
     quat: new Float32Array(quatArr), // フレーム毎の向き（4成分/フレーム。roll を含む）
-    phases: phaseInfos,
+    shots: phaseInfos,
   };
 
   // ---- phase steppers（director の各 tick の固定ステップ版） ----
@@ -217,6 +228,34 @@ export function bakeGenerateCamera(gcfg, env) {
       frame: m.frame ?? info.startFrame + frames,
       editable: m.editable,
     }));
+  }
+
+  /**
+   * type:"static"。duration 秒、固定位置にカメラを据える（定点）。
+   * lookAt の target 追従はしてよい。fov は配列でランプ／数値で固定。
+   */
+  function stepStatic(phase, info) {
+    // 位置: "@current" は直前フレーム位置を維持、配列は relativeTo オフセット加算
+    if (phase.pos !== '@current') {
+      state.pos.set(phase.pos[0], phase.pos[1], phase.pos[2]);
+      if (phase.relativeTo === 'bottle') state.pos.add(bottleCenter);
+    }
+    const easeFn = gsap.parseEase(phase.ease || 'none');
+    const dur = phase.duration ?? 1;
+    const frames = Math.max(1, Math.round(dur * FPS));
+    const fovArr = Array.isArray(phase.fov);
+    const fovFrom = phase.fov != null ? (fovArr ? phase.fov[0] : phase.fov) : null;
+    const fovTo = phase.fov != null ? (fovArr ? phase.fov[1] ?? phase.fov[0] : phase.fov) : null;
+
+    for (let f = 1; f <= frames; f++) {
+      const t = easeFn(Math.min((f * DT) / dur, 1));
+      if (fovFrom !== null) state.fov = fovFrom + (fovTo - fovFrom) * t;
+      const freeQ = applyOrientationSim(phase.lookAt, null, t, t, DT);
+      state.time += DT;
+      record(freeQ);
+    }
+    info.holdSec = dur;
+    info.markers = [{ kf: 0, frame: info.startFrame, editable: true }];
   }
 
   /** type:"follow"。FollowEvaluator を固定ステップで回す。プレビュー尺は minHold */

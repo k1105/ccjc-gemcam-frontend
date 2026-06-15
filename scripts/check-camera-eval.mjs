@@ -28,7 +28,7 @@ const baked = bakeGenerateCamera(choreo.generate, { heroPos });
 const snap = {
   totalFrames: baked.totalFrames,
   swapTime: baked.swapTime,
-  phases: baked.phases.map((p) => ({
+  phases: baked.shots.map((p) => ({
     id: p.id,
     type: p.type,
     startFrame: p.startFrame,

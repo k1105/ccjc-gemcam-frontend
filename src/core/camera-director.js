@@ -112,7 +112,15 @@ export class CameraDirector {
       const keys = lookCfg.keys;
       if (hasFreeOrientation(keys)) {
         const q = sampleOrientationQuat(keys, uLin, this._resolve, this.camera.position, _q);
-        if (q) smoothQuat(this.camera.quaternion, q, lookCfg.lerp, dt);
+        if (q) {
+          // cut 直後は _lookInitialized=false → 初回 snap（不連続な向きへ即切替）
+          if (!this._lookInitialized) {
+            this.camera.quaternion.copy(q);
+            this._lookInitialized = true;
+          } else {
+            smoothQuat(this.camera.quaternion, q, lookCfg.lerp, dt);
+          }
+        }
         return;
       }
       const pt = sampleAimPoint(keys, uLin, this._resolve, _look);
@@ -132,8 +140,63 @@ export class CameraDirector {
     }
   }
 
+  /**
+   * 解決済みワールド位置を返す（static ショット / cut の起点用）。
+   * pos:"@current" は現在カメラ位置、配列は relativeTo オフセット加算。
+   */
+  _staticPos(phase, offset, out) {
+    if (phase.pos === '@current') return out.copy(this.camera.position);
+    out.set(phase.pos[0], phase.pos[1], phase.pos[2]);
+    if (offset) out.add(offset);
+    return out;
+  }
+
+  /**
+   * 定点ショット（type:"static"）。duration 秒、固定位置にカメラを据える。
+   * lookAt は target 指定なら被写体を追ってよい（定点パン/首振り）。fov は配列で
+   * ランプ、数値で固定。cut:true なら向きを開始時に snap（マルチカムのハードカット）。
+   */
+  playStatic(phase) {
+    if (phase.cut) this._lookInitialized = false;
+    const offset = this._resolveOffset(phase);
+    const pos = this._staticPos(phase, offset, _pos).clone();
+    this.camera.position.copy(pos);
+    const fovArr = Array.isArray(phase.fov);
+    const fovFrom = phase.fov != null ? (fovArr ? phase.fov[0] : phase.fov) : null;
+    const fovTo = phase.fov != null ? (fovArr ? phase.fov[1] ?? phase.fov[0] : phase.fov) : null;
+    const state = { t: 0 };
+
+    return new Promise((resolve) => {
+      const tick = (dt) => {
+        this.camera.position.copy(pos); // 定点（lookAt の target 追従はしてよい）
+        if (fovFrom !== null) {
+          this.camera.fov = fovFrom + (fovTo - fovFrom) * state.t;
+          this.camera.updateProjectionMatrix();
+        }
+        this._applyOrientation(phase.lookAt, null, state.t, state.t, dt);
+      };
+      this.world.addTickable(tick);
+      this._activeTicks.add(tick);
+
+      const tween = gsap.to(state, {
+        t: 1,
+        duration: phase.duration ?? 1,
+        ease: phase.ease || 'none',
+        onComplete: () => {
+          tick(1 / 60);
+          this.world.removeTickable(tick);
+          this._activeTicks.delete(tick);
+          this._activeTweens.delete(tween);
+          resolve();
+        },
+      });
+      this._activeTweens.add(tween);
+    });
+  }
+
   /** 一方向パスを再生して完了で resolve */
   playPhase(phase) {
+    if (phase.cut) this._lookInitialized = false; // ハードカット: 向きを開始時 snap
     const offset = this._resolveOffset(phase);
     const curve = this._buildCurve(phase.path, offset);
     const aimKeys = buildKeyframeAimKeys(phase, controlPointArcFractions(curve)); // 注視点オーバーライド

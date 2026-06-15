@@ -10,7 +10,7 @@ const HANDLE_COLOR = 0x46d3ff;
 const AIM_COLOR = 0x7cffb0; // 注視点(look)オーバーライド
 
 /**
- * generate.phases のカメラパスを 3Dビューポート上で編集するツール。
+ * generate.shots（path 型ショット）のカメラパスを 3Dビューポート上で編集するツール。
  * - 位置キーフレーム（アンカー）: クリック選択 / TransformControls ドラッグ / 数値編集
  * - ベジェ: 各キーフレームを auto（CatmullRom自動接線）/ manual（in/out ハンドル）で切替
  * - 注視点(look)オーバーライド: 各キーフレームに任意で注視点を持たせられる。緑のポインタ球を
@@ -73,7 +73,7 @@ export class PathEditor {
   }
 
   _phases() {
-    return this.ctx.choreo.data.generate.phases.filter((p) => Array.isArray(p.path));
+    return this.ctx.choreo.data.generate.shots.filter((p) => Array.isArray(p.path));
   }
 
   _currentPhase() {

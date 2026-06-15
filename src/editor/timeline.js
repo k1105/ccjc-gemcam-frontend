@@ -25,7 +25,7 @@ import { PreviewStage } from './preview-stage.js';
  *   Space 再生/停止 ・ ←/→ ±1f（Shift ±10f）・ Home/End 先頭/末尾
  *   V 視点切替 ・ Esc 閉じる
  */
-const TRAJ_COLORS = { path: 0x5b8bd5, follow: 0xb07cd8, loop: 0x35b3a2 };
+const TRAJ_COLORS = { path: 0x5b8bd5, follow: 0xb07cd8, loop: 0x35b3a2, static: 0xd5a15b };
 const HERO_COLOR = 0xff8844;
 export class Timeline {
   constructor(ctx, { pathEditor }) {
@@ -299,7 +299,7 @@ export class Timeline {
       child.material.dispose();
     }
     const b = this.baked;
-    for (const p of b.phases) {
+    for (const p of b.shots) {
       const pts = [];
       const end = Math.min(p.startFrame + p.frameCount, b.totalFrames - 1);
       for (let f = p.startFrame; f <= end; f += 2) {
@@ -412,8 +412,8 @@ export class Timeline {
     if (!this.baked) return null;
     const i = Math.round(frame);
     return (
-      this.baked.phases.find((p) => i >= p.startFrame && i < p.startFrame + p.frameCount) ??
-      this.baked.phases[this.baked.phases.length - 1]
+      this.baked.shots.find((p) => i >= p.startFrame && i < p.startFrame + p.frameCount) ??
+      this.baked.shots[this.baked.shots.length - 1]
     );
   }
 
@@ -547,12 +547,12 @@ export class Timeline {
   _jumpPhase(dir) {
     if (!this.baked) return;
     const cur = this._phaseAt(this.frame);
-    const idx = this.baked.phases.indexOf(cur);
+    const idx = this.baked.shots.indexOf(cur);
     if (dir < 0 && Math.round(this.frame) > cur.startFrame + 2) {
-      this._seek(cur.startFrame); // フェーズ途中なら自フェーズ先頭へ
+      this._seek(cur.startFrame); // ショット途中なら自ショット先頭へ
       return;
     }
-    const next = this.baked.phases[Math.max(0, Math.min(idx + dir, this.baked.phases.length - 1))];
+    const next = this.baked.shots[Math.max(0, Math.min(idx + dir, this.baked.shots.length - 1))];
     this._seek(next.startFrame);
   }
 
@@ -562,12 +562,12 @@ export class Timeline {
     const b = this.baked;
     this.track.innerHTML = '';
 
-    for (const p of b.phases) {
+    for (const p of b.shots) {
       const block = document.createElement('div');
       block.className = `tlx-phase tlx-${p.type}`;
       block.style.left = `${(p.startFrame / b.totalFrames) * 100}%`;
       block.style.width = `${(p.frameCount / b.totalFrames) * 100}%`;
-      const holdNote = p.type === 'path' ? '' : ' (hold)';
+      const holdNote = p.type === 'follow' || p.type === 'loop' ? ' (hold)' : '';
       block.innerHTML = `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`;
       block.title = `${p.id} — クリックでシーク`;
       this.track.appendChild(block);
@@ -660,6 +660,7 @@ function injectStyles() {
   border-right: 1px solid rgba(0,0,0,0.55); overflow: hidden; pointer-events: none;
 }
 .tlx-path   { background: linear-gradient(#33557f, #2a4569); }
+.tlx-static { background: linear-gradient(#7f6533, #695227); }
 .tlx-follow { background: linear-gradient(#6a4a8c, #573b75); }
 .tlx-loop   { background: linear-gradient(#2a7d72, #226359); }
 .tlx-follow, .tlx-loop {

@@ -62,12 +62,12 @@ const baked = await page.evaluate(() => {
   return {
     totalFrames: b.totalFrames,
     swapTime: b.swapTime,
-    phases: b.phases.map((p) => ({ id: p.id, type: p.type, frames: p.frameCount, markers: (p.markers ?? []).length })),
+    phases: b.shots.map((p) => ({ id: p.id, type: p.type, frames: p.frameCount, markers: (p.markers ?? []).length })),
   };
 });
 console.log('baked:', JSON.stringify(baked));
 assert(baked.totalFrames > 300, `ベイク済み (${baked.totalFrames} frames)`);
-assert(baked.phases.length === 4, '4フェーズ');
+assert(baked.phases.length === 4, '4ショット');
 assert(baked.swapTime !== null, 'swapTime(photoRecede終了)が確定');
 
 console.log('--- frame step determinism');
@@ -89,7 +89,7 @@ assert(JSON.stringify(d) === JSON.stringify(a), '← で1フレーム戻る（=f
 
 console.log('--- scrub to follow phase (particles visible)');
 const followStart = await page.evaluate(() => {
-  const p = window.app.editor.timeline.baked.phases.find((x) => x.type === 'follow');
+  const p = window.app.editor.timeline.baked.shots.find((x) => x.type === 'follow');
   return p.startFrame + Math.floor(p.frameCount / 2);
 });
 await seek(followStart);
@@ -144,7 +144,7 @@ console.log('--- edit a path value -> auto rebake');
 const framesBefore = baked.totalFrames;
 await page.evaluate(() => {
   const choreo = window.app.ctx.choreo;
-  choreo.data.generate.phases[0].duration = 4.0; // 3.0 -> 4.0
+  choreo.data.generate.shots[0].duration = 4.0; // 3.0 -> 4.0
   window.app.editor.timeline.invalidate();
 });
 await page.waitForTimeout(600);

@@ -8,7 +8,7 @@ import { createBottle } from '../world/bottle-factory.js';
  * GENERATE: 撮影写真が3D平面としてカメラから遠ざかり、パーティクルに分解されて
  * 選択ボトルへ流れていく。カメラは hero パーティクルを追従し、ボトル付近を
  * フライバイ → 生成完了まで周回 → プルバック → 閃光 → RESULT。
- * choreography.json の generate.phases がカメラ編成を定義する。
+ * choreography.json の generate.shots がカメラ編成（ショット列）を定義する。
  */
 export class GenerateSequence extends Sequence {
   async enter(payload) {
@@ -25,9 +25,9 @@ export class GenerateSequence extends Sequence {
     bottleRack.setVisible(false);
     overlay.hideAll();
 
-    // --- カメラを phase0 開始位置へ即時セット（DOM白フラッシュが画面を覆っている間） ---
-    const ph0 = gcfg.phases[0];
-    const startKf = ph0.path[0];
+    // --- カメラを shot0 開始位置へ即時セット（DOM白フラッシュが画面を覆っている間） ---
+    const ph0 = gcfg.shots[0];
+    const startKf = ph0.type === 'static' ? ph0.pos : ph0.path[0];
     world.camera.position.set(...(Array.isArray(startKf) ? startKf : startKf.p));
     world.camera.fov = ph0.fov ? ph0.fov[0] : world.camera.fov;
     world.camera.updateProjectionMatrix();
@@ -98,8 +98,8 @@ export class GenerateSequence extends Sequence {
     const { overlay, manager, director } = this.ctx;
     let result = null;
 
-    // phases を順に再生。type:"loop"/"follow" が生成完了待ちのホールド点になる
-    for (const ph of gcfg.phases) {
+    // shots を順に再生。type:"loop"/"follow" が生成完了待ちのホールド点になる
+    for (const ph of gcfg.shots) {
       if (this.bag.disposed) return;
 
       if (ph.type === 'path') {
@@ -107,6 +107,9 @@ export class GenerateSequence extends Sequence {
         if (this.bag.disposed) return;
         // 写真の後退が終わったら平面→パーティクルへスワップして分解開始
         if (ph.id === 'photoRecede') this._swapToParticles();
+      } else if (ph.type === 'static') {
+        await director.playStatic(ph);
+        if (this.bag.disposed) return;
       } else {
         const hold = ph.type === 'follow' ? director.playFollow(ph) : director.playLoop(ph);
         try {

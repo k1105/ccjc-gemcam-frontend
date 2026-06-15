@@ -30,9 +30,9 @@ export class PreviewStage {
   async open(brand) {
     const { world, choreo } = this.ctx;
     const gcfg = choreo.data.generate;
-    const ph0 = gcfg.phases[0];
+    const ph0 = gcfg.shots[0];
 
-    // --- generate.enter 鏡像: phase0 開始カメラからフラスタムを満たすプレーン ---
+    // --- generate.enter 鏡像: shot0 開始カメラからフラスタムを満たすプレーン ---
     const camPos = Array.isArray(ph0.path?.[0])
       ? new THREE.Vector3(...ph0.path[0])
       : world.camera.position.clone();

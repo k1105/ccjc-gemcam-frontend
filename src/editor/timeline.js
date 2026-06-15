@@ -603,10 +603,13 @@ export class Timeline {
       block.style.width = `${(p.frameCount / b.totalFrames) * 100}%`;
       const holdNote = p.type === 'follow' || p.type === 'loop' ? ' (hold)' : '';
       block.innerHTML = `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`;
-      // 定点ブロックは掴んで左右ドラッグで start（被せ位置）を移動
-      block.title = isStatic ? `${p.id} — ドラッグで開始位置を移動` : `${p.id} — クリックでシーク`;
+      // 定点ブロック=掴んでドラッグで start 移動。それ以外=クリックで選択＋シーク（ドラッグでスクラブ）
+      block.title = isStatic
+        ? `${p.id} — クリックで選択 / ドラッグで開始位置を移動`
+        : `${p.id} — クリックで選択＋シーク`;
       this.track.appendChild(block);
       if (isStatic) this._attachShotDrag(block, p.id);
+      else this._attachBlockSelect(block, p.id);
 
       for (const m of p.markers ?? []) {
         const marker = document.createElement('div');
@@ -697,6 +700,35 @@ export class Timeline {
       };
       el.addEventListener('pointermove', move);
       el.addEventListener('pointerup', up);
+    });
+  }
+
+  /**
+   * base ショット（path/follow/loop）のブロック: クリックでショット選択＋シーク、
+   * ドラッグでスクラブ（トラックと同じ）。
+   */
+  _attachBlockSelect(block, shotId) {
+    block.style.pointerEvents = 'auto';
+    block.style.cursor = 'pointer';
+    block.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (!this.baked) return;
+      block.setPointerCapture(e.pointerId);
+      const seekTo = (ev) => {
+        const r = this.track.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min((ev.clientX - r.left) / r.width, 1));
+        this._seek(Math.round(ratio * (this.baked.totalFrames - 1)));
+      };
+      seekTo(e);
+      this.pathEditor.selectShot(shotId);
+      const move = (ev) => seekTo(ev);
+      const up = (ev) => {
+        block.releasePointerCapture?.(ev.pointerId);
+        block.removeEventListener('pointermove', move);
+        block.removeEventListener('pointerup', up);
+      };
+      block.addEventListener('pointermove', move);
+      block.addEventListener('pointerup', up);
     });
   }
 

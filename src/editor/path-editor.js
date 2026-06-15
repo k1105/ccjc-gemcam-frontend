@@ -83,10 +83,9 @@ export class PathEditor {
     // ショット/キーフレームの選択はタイムラインの◆・3Dクリック・管理ボタンで行う
     this.gui.add(this.state, 'preview').name('▶ Preview shot（実時間再生）');
 
-    // ショット管理（追加/削除/並べ替え。選択中ショットに対して作用）
+    // ショット管理（追加/削除/並べ替え。選択中ショットに対して作用。
+    // 選択はタイムラインのブロック/◆クリック・3Dクリックで。選択中はタイムライン枠で表示）
     this.shotsFolder = this.gui.addFolder('Shots（再生順・管理）');
-    this._shotReadout = { cur: '—' };
-    this._shotReadoutCtrl = this.shotsFolder.add(this._shotReadout, 'cur').name('選択中').disable();
     const acts = {
       addStatic: () => this._addShot('static'),
       addPath: () => this._addShot('path'),
@@ -167,7 +166,6 @@ export class PathEditor {
 
   /** ショット切替・import 後などの全再構築。ショット種別で編集UIを振り分ける */
   rebuild() {
-    this._updateShotReadout();
     this.timeline?._highlightSelectedShot?.(); // タイムラインの選択ハイライト更新
     const shot = this._currentShot();
     if (!shot) {
@@ -198,13 +196,6 @@ export class PathEditor {
 
     this._rebuildViz();
     this._buildKfPanel();
-  }
-
-  _updateShotReadout() {
-    const shots = this._shots();
-    const cur = this._currentShot();
-    this._shotReadout.cur = cur ? `#${shots.indexOf(cur)} ${cur.id} (${cur.type})` : '—';
-    this._shotReadoutCtrl?.updateDisplay();
   }
 
   /** path 系ビューポート要素（アンカー/線/ハンドル/aim）を全消去 */

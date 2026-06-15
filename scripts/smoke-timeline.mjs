@@ -155,6 +155,20 @@ await page.waitForTimeout(600);
 const framesAfter = await page.evaluate(() => window.app.editor.timeline.baked.totalFrames);
 assert(framesAfter === framesBefore + 60, `値変更で自動リベイク (${framesBefore} -> ${framesAfter})`);
 
+console.log('--- click base block to select shot (incl. follow) ---');
+const obBox = await page.$eval('.tlx-phase[data-shot="orbitFollow"]', (el) => {
+  const r = el.getBoundingClientRect();
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+});
+await page.mouse.click(obBox.x, obBox.y);
+await page.waitForTimeout(300);
+const blkSel = await page.evaluate(() => ({
+  id: window.app.editor.pathEditor.state.phaseId,
+  hi: !!document.querySelector('.tlx-phase[data-shot="orbitFollow"].tlx-selected'),
+}));
+assert(blkSel.id === 'orbitFollow', `follow ブロッククリックで選択 (${blkSel.id})`);
+assert(blkSel.hi, 'クリックしたブロックが枠ハイライト');
+
 console.log('--- add/remove a static shot @playhead (Phase4b)');
 // プレイヘッドをショット#1(heroFollow)の中間へ → static はその直後(index 2)に入るはず
 const phShot = await page.evaluate(() => {

@@ -124,6 +124,7 @@ export class PreviewStage {
    * 写真プレーン、以降はパーティクル（particleTime = T - swapTime）。
    */
   setTime(T, swapTime) {
+    this.lightRig?.setTime(T); // ライトのキーフレーム（絶対秒）を反映
     if (!this.particles) return;
     const swapped = swapTime !== null && T >= swapTime;
     if (this.plane) this.plane.visible = !swapped;

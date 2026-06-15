@@ -909,7 +909,9 @@ export class PathEditor {
 
   /** ライト変更をプレビューへ反映＋undo通知（ビューポート再構築なし） */
   _lightChanged() {
-    this.timeline?.stage?.syncLights?.();
+    const stage = this.timeline?.stage;
+    stage?.syncLights?.(); // 静的値を反映（base）
+    stage?.lightRig?.setTime?.(this.timeline?.currentTime ?? 0); // キーフレームを現在時刻で上書き
     this.onChanged?.();
   }
 
@@ -1014,9 +1016,11 @@ export class PathEditor {
       .name('種別')
       .onChange((m) => this._setLightType(m));
     this.lightFolder.addColor(lt, 'color').name('色').onChange(() => this._lightChanged());
+    this._lightKeyFolder(lt, 'colorKeys', 'color');
     this._freeRange(this.lightFolder.add(lt, 'intensity', 0, 50, 0.1))
       .name('強度')
       .onChange(() => this._lightChanged());
+    this._lightKeyFolder(lt, 'intensityKeys', 'scalar');
 
     const posF = this.lightFolder.addFolder('位置');
     const posProxy = { x: lt.pos[0], y: lt.pos[1], z: lt.pos[2] };
@@ -1055,6 +1059,55 @@ export class PathEditor {
       );
     }
     this.lightPanel = { posProxy, posCtrls };
+  }
+
+  /** intensity/color のキーフレーム編集UI（点滅・パルス。t=絶対秒、現在時刻で追加） */
+  _lightKeyFolder(lt, prop, kind) {
+    const keys = lt[prop];
+    const has = Array.isArray(keys) && keys.length;
+    const label = kind === 'color' ? 'color keyframes（時間変化）' : 'intensity keyframes（点滅/パルス）';
+    const f = this.lightFolder.addFolder(label);
+    f.add({ on: !!has }, 'on').name('キーフレーム化').onChange((on) => this._setLightKeys(lt, prop, kind, on));
+    if (!has) return;
+    f.add({ add: () => this._addLightKey(lt, prop, kind) }, 'add').name('＋ キー（現在時刻）');
+    keys.forEach((k, idx) => {
+      const r = f.addFolder(`#${idx}  t=${(k.t ?? 0).toFixed(2)}s`);
+      r.add(k, 't', 0, 20, 0.05).name('t（秒）').onChange(() => this._lightChanged());
+      if (kind === 'scalar') {
+        this._freeRange(r.add(k, 'v', 0, 50, 0.1)).name('強度').onChange(() => this._lightChanged());
+      } else {
+        r.addColor(k, 'c').name('色').onChange(() => this._lightChanged());
+      }
+      r.add({ rm: () => this._removeLightKey(lt, prop, idx) }, 'rm').name('削除');
+    });
+  }
+
+  _setLightKeys(lt, prop, kind, on) {
+    const now = Number((this.timeline?.currentTime ?? 0).toFixed(2));
+    if (on) {
+      lt[prop] =
+        kind === 'scalar' ? [{ t: now, v: lt.intensity ?? 1 }] : [{ t: now, c: lt.color ?? '#ffffff' }];
+    } else {
+      delete lt[prop];
+    }
+    this._buildLightPanel();
+    this._lightChanged();
+  }
+
+  _addLightKey(lt, prop, kind) {
+    const keys = lt[prop];
+    if (!keys) return;
+    const now = Number((this.timeline?.currentTime ?? 0).toFixed(2));
+    keys.push(kind === 'scalar' ? { t: now, v: lt.intensity ?? 1 } : { t: now, c: lt.color ?? '#ffffff' });
+    this._buildLightPanel();
+    this._lightChanged();
+  }
+
+  _removeLightKey(lt, prop, idx) {
+    lt[prop]?.splice(idx, 1);
+    if (lt[prop] && !lt[prop].length) delete lt[prop];
+    this._buildLightPanel();
+    this._lightChanged();
   }
 
   /** シーン内のライトをスタック表示して選択するパネルを再構築 */

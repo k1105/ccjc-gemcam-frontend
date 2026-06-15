@@ -353,6 +353,20 @@ const ldrag = await page.evaluate(() => {
 });
 assert(Math.abs(ldrag.after - ldrag.before) > 1, `ドラッグで pos 更新 (${ldrag.before} -> ${ldrag.after})`);
 assert(Math.abs(ldrag.sceneX - ldrag.after) < 1e-3, `実ライトが追従 (sceneX=${ldrag.sceneX})`);
+console.log('--- light intensity keyframe (pattern) ---');
+await page.evaluate(() => {
+  const lt = window.app.ctx.choreo.data.generate.lights[0];
+  lt.intensityKeys = [{ t: 0, v: 0 }, { t: 2, v: 20 }];
+  window.app.editor.pathEditor._lightChanged();
+});
+await page.evaluate(() => window.app.editor.timeline._seek(0));
+await page.waitForTimeout(60);
+const ki0 = await page.evaluate(() => window.app.ctx.world.scene.children.find((o) => o.isPointLight).intensity);
+await page.evaluate(() => window.app.editor.timeline._seek(60)); // t=1s
+await page.waitForTimeout(60);
+const ki1 = await page.evaluate(() => window.app.ctx.world.scene.children.find((o) => o.isPointLight).intensity);
+assert(ki0 < 1 && Math.abs(ki1 - 10) < 1, `intensity キーフレームで時間変化 (t0=${ki0}, t1=${ki1})`);
+
 await page.evaluate(() => window.app.editor.pathEditor._removeLight());
 await page.waitForTimeout(300);
 const lrem = await page.evaluate(() => ({

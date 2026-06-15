@@ -26,9 +26,16 @@ export class GenerateSequence extends Sequence {
     bottleRack.setVisible(false);
     overlay.hideAll();
 
-    // 配置ライト（generate.lights）をシーンへ反映
+    // 配置ライト（generate.lights）をシーンへ反映＋経過秒でキーフレーム駆動
     this.lightRig = new LightRig(world.scene);
     this.lightRig.sync(gcfg.lights ?? []);
+    let lightElapsed = 0;
+    const lightTick = (dt) => {
+      lightElapsed += dt;
+      this.lightRig?.setTime(lightElapsed);
+    };
+    world.addTickable(lightTick);
+    this.bag.add(() => world.removeTickable(lightTick));
 
     // --- カメラを最初の base ショット開始位置へ即時セット（DOM白フラッシュ中） ---
     const ph0 = gcfg.shots.find((s) => s.type !== 'static') ?? gcfg.shots[0];

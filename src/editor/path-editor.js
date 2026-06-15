@@ -90,11 +90,31 @@ export class PathEditor {
     ctx.world.scene.add(this.tcHelper);
     this.tc.enabled = false;
     this.tc.setSize(0.7);
-    this.tc.addEventListener('objectChange', () => this._onGizmoChange());
+    this.tc.addEventListener('objectChange', () => this._onObjectChange());
+
+    // 回転モーダル用の不可視プロキシ。pivot に置いて rotate ギズモ（リング）を掴ませ、
+    // その回転を「向きベクトル」へ写像する（マーカー球は自前の回転を持たないため）。
+    this._rotProxy = new THREE.Object3D();
+    ctx.world.scene.add(this._rotProxy);
 
     this.raycaster = new THREE.Raycaster();
     this._onPointerDown = (e) => this._pick(e);
     ctx.world.renderer.domElement.addEventListener('pointerdown', this._onPointerDown);
+
+    // --- Blender 風モーダル変換（g/gx/gy/gz・r/rx/ry/rz・数値入力）。
+    //     選択中ギズモ対象（this.tc.object）を移動/回転する。確定=左クリック/Enter、取消=右クリック/Esc。 ---
+    this._modal = null;
+    this._lastPointer = { x: 0, y: 0 };
+    this._modalRay = new THREE.Raycaster();
+    this._onModalKey = (e) => this._handleModalKey(e);
+    this._onPointerTrack = (e) => this._trackPointer(e);
+    this._onModalPointerDown = (e) => this._handleModalPointerDown(e);
+    this._onModalContext = (e) => { if (this._modal) e.preventDefault(); };
+    // capture: タイムラインの window キャプチャ（g/r/数字を握りつぶす）より先に処理する
+    window.addEventListener('keydown', this._onModalKey, true);
+    window.addEventListener('pointermove', this._onPointerTrack, true);
+    ctx.world.renderer.domElement.addEventListener('pointerdown', this._onModalPointerDown, true);
+    ctx.world.renderer.domElement.addEventListener('contextmenu', this._onModalContext);
 
     // ショット/キーフレームの選択はタイムラインの◆・3Dクリック・管理ボタンで行う
     this.gui.add(this.state, 'preview').name('▶ Preview shot（実時間再生）');
@@ -221,6 +241,7 @@ export class PathEditor {
     this.viz.visible = active;
     this.tc.enabled = active;
     this.tcHelper.visible = active && !!this.tc.object;
+    if (!active) this._cancelModal();
     if (active) this.rebuild();
   }
 
@@ -1495,6 +1516,7 @@ export class PathEditor {
   /** ビューポートクリックでアンカー/ハンドル/aim 球を選択（ギズモ操作とは排他） */
   _pick(e) {
     if (!this.active || e.button !== 0) return;
+    if (this._modal) return; // モーダル変換中は再選択しない
     if (this.tc.axis) return;
     const targets = [
       ...this.handles,
@@ -1635,8 +1657,9 @@ export class PathEditor {
     return next.sub(prev).multiplyScalar(0.5);
   }
 
-  _onGizmoChange() {
-    const obj = this.tc.object;
+  // target 省略時は tc のドラッグ対象。モーダル変換では実際に動かしたマーカーを渡す
+  _onGizmoChange(target) {
+    const obj = target || this.tc.object;
     if (!obj) return;
     const ud = obj.userData;
 
@@ -1887,11 +1910,376 @@ export class PathEditor {
     }
   }
 
+  // ====================== Blender 風モーダル変換 ======================
+  // g=移動 / r=回転、続けて x|y|z でワールド軸拘束、数字で正確な数値入力。
+  // 移動は対象マーカーを動かし、回転はその対象を「自然な基準点」周りに回す
+  // （ライト注視点→ライト位置 / ライト位置→注視点 / 定点注視点→定点位置 …）。
+  // 内部的には既存の this.tc.object を直接動かして _onGizmoChange() で choreo へ反映する。
+
+  /** 最後のポインタ位置（client座標）を保持。移動モーダル中だけマウス追従で更新
+   *  （回転はリングドラッグの objectChange と数値入力で駆動するため追従不要） */
+  _trackPointer(e) {
+    this._lastPointer.x = e.clientX;
+    this._lastPointer.y = e.clientY;
+    if (this._modal?.type === 'translate') this._updateModal();
+  }
+
+  _handleModalKey(e) {
+    if (!this.active) return;
+    const tag = e.target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // undo/redo 等は素通し
+
+    const m = this._modal;
+    const k = e.key;
+
+    if (!m) {
+      // 開始コマンド（選択中ギズモがある時だけ）
+      let started = false;
+      if (k === 'g' || k === 'G') started = this._startModal('translate');
+      else if (k === 'r' || k === 'R') started = this._startModal('rotate');
+      if (started) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
+
+    let handled = true;
+    if (k === 'Escape') this._cancelModal();
+    else if (k === 'Enter') this._confirmModal();
+    else if (k === 'g' || k === 'G') { this._cancelModal(); this._startModal('translate'); } // モード切替（元状態から再初期化）
+    else if (k === 'r' || k === 'R') { this._cancelModal(); this._startModal('rotate'); }
+    else if (k === 'x' || k === 'X') this._setModalAxis('x');
+    else if (k === 'y' || k === 'Y') this._setModalAxis('y');
+    else if (k === 'z' || k === 'Z') this._setModalAxis('z');
+    else if (k === 'Backspace') { m.numeric = m.numeric.slice(0, -1); this._updateModal(); }
+    else if (k === '-') { m.numeric = m.numeric.startsWith('-') ? m.numeric.slice(1) : '-' + m.numeric; this._updateModal(); }
+    else if (/^[0-9.]$/.test(k)) { m.numeric += k; this._updateModal(); }
+    else handled = false;
+
+    if (handled) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  _handleModalPointerDown(e) {
+    const m = this._modal;
+    if (!m) return;
+    if (e.button === 2) {
+      // 右クリック=取消
+      e.preventDefault();
+      e.stopPropagation();
+      this._cancelModal();
+      return;
+    }
+    if (m.type === 'rotate') {
+      // 回転は左クリックでリングを掴ませる（tc に通す）。確定は Enter。
+      return;
+    }
+    // 移動モーダル：左クリックで確定
+    e.preventDefault();
+    e.stopPropagation();
+    this._confirmModal();
+  }
+
+  /** ワールド軸の単位ベクトル */
+  _axisVec(axis) {
+    return new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
+  }
+
+  /**
+   * 回転の基準点（ワールド）。対象の種別に応じて「向きの根元」を返す。
+   * 自然な基準が無いもの（アンカー/ハンドル/ストリーム）は自分自身＝回転は実質無効。
+   */
+  _transformPivot(obj) {
+    const ud = obj.userData || {};
+    const self = obj.position.clone();
+    switch (ud.kind) {
+      case 'light-target': {
+        const lt = this._lights().find((l) => l.id === ud.id);
+        return lt && Array.isArray(lt.pos) ? new THREE.Vector3(...lt.pos) : self;
+      }
+      case 'light-pos': {
+        const lt = this._lights().find((l) => l.id === ud.id);
+        return lt && Array.isArray(lt.target) ? new THREE.Vector3(...lt.target) : self;
+      }
+      case 'static-look':
+      case 'static-aimkey':
+        return this._staticPosWorld(this._currentShot()) || self;
+      case 'static-pos':
+        return this._staticLookPoint(this._currentShot()) || self;
+      case 'aim':
+      case 'handle': {
+        const entry = this._currentPhase()?.path[ud.kfIndex];
+        return entry ? kfPos(entry).add(this._offset()) : self;
+      }
+      default:
+        return self; // anchor / stream-p1 / stream-p2: 回転の基準なし
+    }
+  }
+
+  /**
+   * 回転時の操作対象。位置/姿勢の「位置」は固定し「向き」を回すため、向きマーカーへ差し替える。
+   * - ライト: 位置マーカー(light-pos)選択でも target を回す（pivot=ライト位置）
+   * - カメラのキーフレーム: アンカー選択時は注視点(look)上書きをONにして注視点を回す（pivot=アンカー位置）。
+   *   look が無ければ「今見ている点」を初期値に生成するので向きは飛ばない。
+   * 戻り値 createdLook: 今回 look 上書きを新規生成した場合 true（取消時に解除する）。
+   */
+  _rotateTarget(obj) {
+    const ud = obj.userData || {};
+    if (ud.kind === 'light-pos') {
+      const lt = this._lights().find((l) => l.id === ud.id);
+      if (lt && Array.isArray(lt.target) && this.lightTargetMarker?.userData?.id === ud.id) {
+        return { obj: this.lightTargetMarker, createdLook: false };
+      }
+    }
+    if (ud.kind === 'anchor' && ud.kfIndex === this.state.keyframe) {
+      const entry = this._currentPhase()?.path[ud.kfIndex];
+      if (entry && entry !== '@current') {
+        const hadLook = this._hasLook(entry);
+        if (!hadLook) this._setLookOverride(true); // 注視点上書きをON（現在の注視点が初期値）
+        if (this.aimSphere) return { obj: this.aimSphere, createdLook: !hadLook };
+      }
+    }
+    return { obj, createdLook: false };
+  }
+
+  /** モーダル変換を開始（または現モーダルのモードを切替）。対象が無ければ false */
+  _startModal(type) {
+    const restoreObj = this.tc.object; // 終了後に戻すギズモ対象（選択マーカー）
+    if (!restoreObj || !this.active) return false;
+    let obj = restoreObj;
+    let createdLook = false;
+    if (type === 'rotate') {
+      const r = this._rotateTarget(obj);
+      obj = r.obj;
+      createdLook = r.createdLook;
+    }
+    const startPos = obj.position.clone();
+    const pivot = this._transformPivot(obj);
+    this._modal = {
+      type,
+      createdLook,
+      restoreObj,
+      axis: null, // null = 移動:視線平面 / 回転:視線軸
+      numeric: '',
+      obj,
+      startPos,
+      pivot,
+      startDir: startPos.clone().sub(pivot), // 回転対象の向きベクトル（開始時）
+      startPointer: { x: this._lastPointer.x, y: this._lastPointer.y },
+      value: 0,
+    };
+    if (type === 'rotate') {
+      // pivot に置いたプロキシへ回転リングを接続し、ドラッグで掴めるようにする
+      this._rotProxy.position.copy(pivot);
+      this._rotProxy.quaternion.identity();
+      this._rotProxy.updateMatrixWorld();
+      this.tc.attach(this._rotProxy);
+      this.tc.setMode('rotate');
+      this.tc.enabled = this.active; // ← リングを掴める
+    } else {
+      this.tc.setMode('translate');
+      this.tc.enabled = false; // 移動は数値/マウス平面で駆動
+    }
+    this.tcHelper.visible = true;
+    this._updateModal();
+    return true;
+  }
+
+  _setModalAxis(axis) {
+    const m = this._modal;
+    m.axis = m.axis === axis ? null : axis; // 同じ軸の再押下で解除
+    if (m.type === 'rotate') {
+      // 軸拘束時は該当リングだけ表示
+      this.tc.showX = !m.axis || m.axis === 'x';
+      this.tc.showY = !m.axis || m.axis === 'y';
+      this.tc.showZ = !m.axis || m.axis === 'z';
+    }
+    this._updateModal();
+  }
+
+  /** 現在の入力（マウス/数値・軸・リングドラッグ）から対象を再計算して反映 */
+  _updateModal() {
+    const m = this._modal;
+    if (!m) return;
+    if (m.type === 'translate') {
+      const r = this._computeTranslate(m);
+      m.value = r.value;
+      m.obj.position.copy(r.pos);
+      this._onGizmoChange(m.obj);
+    } else {
+      // 数値入力があればプロキシを単一軸回転で上書き、無ければリングドラッグのまま反映
+      const num = parseFloat(m.numeric);
+      if (!Number.isNaN(num)) {
+        this._rotProxy.quaternion.setFromAxisAngle(this._rotAxisVec(m), num * THREE.MathUtils.DEG2RAD);
+        this._rotProxy.updateMatrixWorld();
+      }
+      this._applyRotProxy();
+    }
+    this._updateHud();
+  }
+
+  /** プロキシの回転を向きベクトルへ写像してマーカーへ反映 */
+  _applyRotProxy() {
+    const m = this._modal;
+    if (!m || m.type !== 'rotate') return;
+    const pos = m.startDir.clone().applyQuaternion(this._rotProxy.quaternion).add(m.pivot);
+    m.obj.position.copy(pos);
+    this._onGizmoChange(m.obj);
+    const q = this._rotProxy.quaternion;
+    m.value = 2 * Math.acos(Math.min(1, Math.abs(q.w))) * THREE.MathUtils.RAD2DEG;
+  }
+
+  /** 数値回転の軸（未指定なら視線軸） */
+  _rotAxisVec(m) {
+    if (m.axis) return this._axisVec(m.axis);
+    const f = new THREE.Vector3();
+    this.ctx.world.camera.getWorldDirection(f);
+    return f.normalize();
+  }
+
+  /** tc の objectChange を、回転プロキシのドラッグ／通常ギズモへ振り分け */
+  _onObjectChange() {
+    if (this._modal?.type === 'rotate' && this.tc.object === this._rotProxy) {
+      this._applyRotProxy();
+      this._updateHud();
+      return;
+    }
+    this._onGizmoChange();
+  }
+
+  /** モーダル終了時の共通後始末（ギズモを選択マーカーへ戻す） */
+  _endModal() {
+    this.tc.setMode('translate'); // 通常ドラッグの矢印へ戻す
+    this.tc.showX = this.tc.showY = this.tc.showZ = true;
+    this.tc.enabled = this.active;
+    this._removeHud();
+  }
+
+  _confirmModal() {
+    const m = this._modal;
+    if (!m) return;
+    this._modal = null;
+    this._endModal();
+    if (m.restoreObj && this.active) this.tc.attach(m.restoreObj);
+    this.onChanged?.();
+  }
+
+  _cancelModal() {
+    const m = this._modal;
+    if (!m) return;
+    m.obj.position.copy(m.startPos); // 元へ戻す
+    this._onGizmoChange(m.obj); // データを開始時へ復元
+    this._modal = null;
+    if (m.createdLook) this._setLookOverride(false); // 今回ONにした注視点上書きは取消で解除
+    this._endModal();
+    if (m.restoreObj && this.active) this.tc.attach(m.restoreObj);
+  }
+
+  /** client座標 → NDC */
+  _pointerNdc(p) {
+    const rect = this.ctx.world.renderer.domElement.getBoundingClientRect();
+    _ndc.set(
+      ((p.x - rect.left) / rect.width) * 2 - 1,
+      -((p.y - rect.top) / rect.height) * 2 + 1
+    );
+    return _ndc;
+  }
+
+  /** 軸直線(origin,dir) 上で、ポインタ視線に最も近い点のパラメータ t */
+  _closestParamOnAxis(origin, dir, pointer) {
+    this._modalRay.setFromCamera(this._pointerNdc(pointer), this.ctx.world.camera);
+    const ro = this._modalRay.ray.origin;
+    const rd = this._modalRay.ray.direction; // 正規化済み
+    const w0 = origin.clone().sub(ro);
+    const b = dir.dot(rd);
+    const d = dir.dot(w0);
+    const e = rd.dot(w0);
+    const denom = 1 - b * b; // dir,rd とも単位ベクトル → a=c=1
+    if (Math.abs(denom) < 1e-6) return 0; // 視線と軸が平行
+    return (b * e - d) / denom;
+  }
+
+  _computeTranslate(m) {
+    const num = parseFloat(m.numeric);
+    const hasNum = !Number.isNaN(num);
+    if (m.axis) {
+      const dir = this._axisVec(m.axis);
+      const dist = hasNum
+        ? num
+        : this._closestParamOnAxis(m.startPos, dir, this._lastPointer) -
+          this._closestParamOnAxis(m.startPos, dir, m.startPointer);
+      return { pos: m.startPos.clone().addScaledVector(dir, dist), value: dist };
+    }
+    if (hasNum) {
+      // 軸未指定の数値入力は X 軸へ（Blender 同様、最初の軸に適用）
+      return { pos: m.startPos.clone().addScaledVector(this._axisVec('x'), num), value: num };
+    }
+    // 視線平面に沿った自由移動
+    const n = new THREE.Vector3();
+    this.ctx.world.camera.getWorldDirection(n);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, m.startPos);
+    const cur = this._rayOnPlane(this._lastPointer, plane);
+    const start = this._rayOnPlane(m.startPointer, plane);
+    if (!cur || !start) return { pos: m.startPos.clone(), value: 0 };
+    const delta = cur.sub(start);
+    return { pos: m.startPos.clone().add(delta), value: delta.length() };
+  }
+
+  _rayOnPlane(pointer, plane) {
+    this._modalRay.setFromCamera(this._pointerNdc(pointer), this.ctx.world.camera);
+    const hit = new THREE.Vector3();
+    return this._modalRay.ray.intersectPlane(plane, hit) ? hit : null;
+  }
+
+  // ---- モーダル中の操作ヒント（画面上部） ----
+  _ensureHud() {
+    if (this._hud) return this._hud;
+    const el = document.createElement('div');
+    el.style.cssText =
+      'position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:2000;' +
+      'padding:4px 10px;background:rgba(20,20,26,.85);color:#e8e8ee;border:1px solid #3a3a44;' +
+      'border-radius:5px;font:12px/1.3 "SF Mono",Menlo,Consolas,monospace;' +
+      'pointer-events:none;white-space:nowrap;';
+    document.body.appendChild(el);
+    this._hud = el;
+    return el;
+  }
+
+  _updateHud() {
+    const m = this._modal;
+    if (!m) return;
+    const el = this._ensureHud();
+    const verb = m.type === 'translate' ? 'Move' : 'Rotate';
+    const axis = m.axis ? m.axis.toUpperCase() : 'view';
+    const unit = m.type === 'translate' ? '' : '°';
+    const shown = m.numeric !== '' ? m.numeric : m.value.toFixed(m.type === 'translate' ? 3 : 1);
+    const drive = m.type === 'rotate' ? 'リング/数字' : 'マウス/数字';
+    el.textContent = `${verb} [${axis}] ${shown}${unit}  ·  X/Y/Z=軸  ${drive}  Enter/左=確定  Esc/右=取消`;
+  }
+
+  _removeHud() {
+    if (this._hud) {
+      this._hud.remove();
+      this._hud = null;
+    }
+  }
+
   dispose() {
+    this._cancelModal();
+    window.removeEventListener('keydown', this._onModalKey, true);
+    window.removeEventListener('pointermove', this._onPointerTrack, true);
+    this.ctx.world.renderer.domElement.removeEventListener('pointerdown', this._onModalPointerDown, true);
+    this.ctx.world.renderer.domElement.removeEventListener('contextmenu', this._onModalContext);
+    this._removeHud();
     this.ctx.world.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
     this.tc.detach();
     this.tc.dispose();
     this.ctx.world.scene.remove(this.tcHelper);
+    this.ctx.world.scene.remove(this._rotProxy);
     this.ctx.world.scene.remove(this.viz);
     for (const s of this.spheres) {
       s.geometry.dispose();

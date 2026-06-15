@@ -42,6 +42,9 @@ export class Editor {
     const ioFolder = this.gui.addFolder('Config IO');
     ioFolder.add({ export: () => exportChoreo(choreo) }, 'export').name('Export JSON（→ src/choreo/ に上書き）');
     ioFolder.add({ import: () => importChoreo(choreo, () => this.rebuild()) }, 'import').name('Import JSON');
+    ioFolder
+      .add({ reset: () => this._resetSaved() }, 'reset')
+      .name('保存をクリア（初期値に戻す）');
 
     const touch = () => this._touch(); // 編集を undo 履歴へ（デバウンス）
 
@@ -155,6 +158,14 @@ export class Editor {
     if (wasVisible) this._show();
   }
 
+  /** localStorage の保存を破棄し、bundled の初期値へ戻して再構築する */
+  _resetSaved() {
+    if (!confirm('保存した編集状態をクリアして初期値に戻しますか？')) return;
+    this.ctx.choreo.clearSaved();
+    this.rebuild();
+    console.log('[Editor] 保存をクリアして初期値に戻しました');
+  }
+
   toggle() {
     this.visible ? this._hide() : this._show();
   }
@@ -186,7 +197,7 @@ export class Editor {
     this._commitTimer = setTimeout(() => this._commit(), 450);
   }
 
-  /** 現在の状態が直近コミットと異なれば履歴に積む */
+  /** 現在の状態が直近コミットと異なれば履歴に積み、localStorage へ保存する */
   _commit() {
     clearTimeout(this._commitTimer);
     const cur = JSON.stringify(this.ctx.choreo.data);
@@ -194,6 +205,7 @@ export class Editor {
       this._undoStack.push(cur);
       this._redoStack.length = 0;
       if (this._undoStack.length > 100) this._undoStack.shift();
+      this.ctx.choreo.save(); // 最新の変更状態を永続化
     }
   }
 
@@ -234,6 +246,7 @@ export class Editor {
     this.pathEditor.rebuild();
     if (this.ctx.manager.is('select')) this.ctx.bottleRack.applyLayout?.();
     this.timeline.invalidate();
+    this.ctx.choreo.save(); // undo/redo 後の状態も保存
   }
 
   dispose() {

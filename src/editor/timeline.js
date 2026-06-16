@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import gsap from 'gsap';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { bakeGenerateCamera, FPS } from './camera-simulator.js';
 import { PreviewStage } from './preview-stage.js';
@@ -323,22 +324,45 @@ export class Timeline {
       child.material.dispose();
     }
     const b = this.baked;
+    // カット（overlay）が被さっているフレーム窓。本線はこの中で「迂回せず破線」にする
+    const cutWindows = b.shots
+      .filter((p) => p.layer === 'overlay')
+      .map((p) => [p.startFrame, p.startFrame + p.frameCount]);
+    const inCut = (f) => cutWindows.some(([a, z]) => f >= a && f < z);
+
     for (const p of b.shots) {
-      const pts = [];
-      const end = Math.min(p.startFrame + p.frameCount, b.totalFrames - 1);
-      for (let f = p.startFrame; f <= end; f += 2) {
-        pts.push(new THREE.Vector3(b.pos[f * 3], b.pos[f * 3 + 1], b.pos[f * 3 + 2]));
+      const color = TRAJ_COLORS[p.type] ?? 0x888888;
+      if (p.layer === 'overlay') {
+        // 割り込みカメラの軌跡＝実際に通る線。本線とは繋げず実線で別個に描く。
+        // 終端は overlay 最終フレーム(startFrame+frameCount-1)まで。+1 すると窓外＝base
+        // 位置（上書きされていない本線）を拾って終わりが本線へ繋がって見えるので含めない。
+        const pts = this._trajPoints(b.pos, p.startFrame, p.startFrame + p.frameCount - 1);
+        if (pts.length >= 2) this.traj.add(this._trajLine(pts, color, false));
+        continue;
       }
-      if (pts.length < 2) continue;
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({
-          color: TRAJ_COLORS[p.type] ?? 0x888888,
-          transparent: true,
-          opacity: 0.9,
-        })
-      );
-      this.traj.add(line);
+      // 本線（base）= overlay 上書き前の本来の軌跡。カット窓内は破線・窓外は実線で分割
+      const src = b.basePos ?? b.pos;
+      const end = Math.min(p.startFrame + p.frameCount, src.length / 3 - 1);
+      let run = [];
+      let runCut = null;
+      const flush = () => {
+        if (run.length >= 2) this.traj.add(this._trajLine(run, color, runCut));
+        run = [];
+      };
+      for (let f = p.startFrame; f <= end; f += 2) {
+        const c = inCut(f);
+        const pt = new THREE.Vector3(src[f * 3], src[f * 3 + 1], src[f * 3 + 2]);
+        if (runCut === null) runCut = c;
+        if (c !== runCut) {
+          run.push(pt); // 境界点は両 run で共有して切れ目なく繋ぐ
+          flush();
+          run = [pt];
+          runCut = c;
+        } else {
+          run.push(pt);
+        }
+      }
+      flush();
     }
 
     // 先鋒（hero粒）の軌道: スワップ以降をフレーム毎に CPU 評価。
@@ -365,6 +389,31 @@ export class Timeline {
         );
       }
     }
+  }
+
+  /** pos 配列の [startFrame, endFrame]（両端含む）を2フレーム間引きで Vector3[] に */
+  _trajPoints(pos, startFrame, endFrame) {
+    const pts = [];
+    const end = Math.min(endFrame, pos.length / 3 - 1);
+    const at = (f) => new THREE.Vector3(pos[f * 3], pos[f * 3 + 1], pos[f * 3 + 2]);
+    let f = startFrame;
+    for (; f <= end; f += 2) pts.push(at(f));
+    if (f - 2 !== end && end > startFrame) pts.push(at(end)); // 間引きで飛んだ終端を補う
+    return pts;
+  }
+
+  /** 軌跡ライン1本。dashed=true は破線（カット窓に被さった本線の表現） */
+  _trajLine(points, color, dashed) {
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    if (dashed) {
+      const line = new THREE.Line(
+        geo,
+        new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.55, dashSize: 0.09, gapSize: 0.07 })
+      );
+      line.computeLineDistances(); // 破線は線距離が必須
+      return line;
+    }
+    return new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }));
   }
 
   _trajBounds() {
@@ -519,7 +568,7 @@ export class Timeline {
         <button data-act="close" title="閉じる (Esc)">✕</button>
       </div>
       <div class="tlx-track"></div>
-      <div class="tlx-hint">←/→: ±1f（Shift ±10f）・Space: 再生・V: 視点(カメラ/俯瞰)・◆クリック: キーフレーム編集・ブロッククリック: シーク・俯瞰の橙ライン/ドット=先鋒の軌道とフレーム毎位置</div>
+      <div class="tlx-hint">←/→: ±1f（Shift ±10f）・Space: 再生・V: 視点(カメラ/俯瞰)・◆ドラッグ: 時刻移動／クリック: 編集・ブロッククリック: シーク・俯瞰の橙ライン/ドット=先鋒の軌道とフレーム毎位置</div>
     `;
     document.body.appendChild(root);
     this.root = root;
@@ -609,12 +658,12 @@ export class Timeline {
     // 今後: return [...this._cameraLanes(), ...this._lightLanes(), ...this._particleLanes()];
   }
 
-  /** カメラトラック: 定点(オーバーレイ=上) / メイン(base=下) の2レーン */
+  /** カメラトラック: カット(オーバーレイ=上) / メイン(base=下) の2レーン */
   _cameraLanes() {
     const b = this.baked;
     const total = b.totalFrames;
     const toClip = (p) => {
-      const isStatic = p.type === 'static';
+      const overlay = p.layer === 'overlay';
       const holdNote = p.type === 'follow' || p.type === 'loop' ? ' (hold)' : '';
       return {
         id: p.id,
@@ -622,54 +671,60 @@ export class Timeline {
         leftPct: (p.startFrame / total) * 100,
         widthPct: (p.frameCount / total) * 100,
         labelHtml: `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`,
-        // 定点ブロック=掴んでドラッグで start 移動。それ以外=クリックで選択＋シーク
-        title: isStatic
+        // カット(overlay)ブロック=掴んでドラッグで start 移動。base=クリックで選択＋シーク
+        title: overlay
           ? `${p.id} — クリックで選択 / ドラッグで開始位置を移動`
           : `${p.id} — クリックで選択＋シーク`,
-        onClip: isStatic
+        onClip: overlay
           ? (el) => this._attachShotDrag(el, p.id)
           : (el) => this._attachBlockSelect(el, p.id),
-        markers: (p.markers ?? []).map((m) => this._cameraMarkerSpec(p, m, isStatic)),
+        markers: (p.markers ?? []).map((m) => this._cameraMarkerSpec(p, m)),
       };
     };
     return [
       {
         laneClass: 'tlx-layer-static',
         divider: true,
-        tag: '定点',
-        clips: b.shots.filter((p) => p.type === 'static').map(toClip),
+        tag: 'カット',
+        clips: b.shots.filter((p) => p.layer === 'overlay').map(toClip),
       },
       {
         laneClass: 'tlx-layer-main',
-        clips: b.shots.filter((p) => p.type !== 'static').map(toClip),
+        clips: b.shots.filter((p) => p.layer !== 'overlay').map(toClip),
       },
     ];
   }
 
-  /** カメラの◆マーカー1つ分の spec（クリック=シーク＋選択、定点編集可=ドラッグでstart移動） */
-  _cameraMarkerSpec(p, m, isStatic) {
+  /**
+   * カメラの◆マーカー1つ分の spec。
+   * 定点(static)カット=単一マーカーをドラッグで start 移動。
+   * path のキーフレーム（編集可）=左右ドラッグで時刻(times)移動／クリックで選択。
+   * '@current'（編集不可）=クリックでシークのみ。
+   */
+  _cameraMarkerSpec(p, m) {
     const base = {
       id: p.id,
       leftPct: (m.frame / this.baked.totalFrames) * 100,
       editable: m.editable,
     };
-    if (isStatic && m.editable) {
+    if (p.type === 'static' && m.editable) {
       // 定点マーカーも掴んで左右ドラッグで start を移動（クリックは選択）
       return { ...base, title: `${p.id} — ドラッグで開始位置を移動`, attachDrag: true };
     }
+    if (m.editable) {
+      // path キーフレーム: 左右ドラッグで到達時刻 times[kf] を移動（クリックで選択）
+      return {
+        ...base,
+        kf: m.kf,
+        frame: m.frame,
+        title: `${p.id} keyframe #${m.kf} — ドラッグで時刻移動 / クリックで編集`,
+        attachKfDrag: true,
+      };
+    }
     return {
       ...base,
-      title: m.editable
-        ? `${p.id} keyframe #${m.kf} — クリックで編集対象に`
-        : `${p.id} #${m.kf} (@current)`,
-      onClick: () => {
-        this._seek(m.frame);
-        if (!m.editable) return;
-        // 定点ショットはショット選択、path はキーフレーム選択
-        const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === p.id);
-        if (shot?.type === 'static') this.pathEditor.selectShot(p.id);
-        else this.pathEditor.selectKeyframe(p.id, m.kf);
-      },
+      title: `${p.id} #${m.kf} (@current)`,
+      onClick: () => this._seek(m.frame),
     };
   }
 
@@ -710,6 +765,8 @@ export class Timeline {
     if (m.title) marker.title = m.title;
     if (m.attachDrag) {
       this._attachShotDrag(marker, m.id);
+    } else if (m.attachKfDrag) {
+      this._attachKfDrag(marker, m.id, m.kf, m.frame);
     } else if (m.onClick) {
       marker.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
@@ -771,6 +828,61 @@ export class Timeline {
           const ratio = Math.max(0, Math.min((ev.clientX - rect.left) / rect.width, 1));
           this._seek(Math.round(ratio * (total - 1)));
         }
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    });
+  }
+
+  /**
+   * path のキーフレーム◆を左右ドラッグ → 到達時刻 times[kf] を移動（時間と曲線は独立）。
+   * ドラッグ中は DOM 位置と times だけ更新し、離した時に1回だけリベイク（onChanged）。
+   * 動かさなければクリック扱い＝シーク＋キーフレーム選択。base / 移動カット 両対応。
+   * times[kf] = ease( (F - startFrame)/frameCount )（=ベイクのマーカー時刻計算の逆算）。
+   * 前後キーの通過フレームでクランプして順序が入れ替わらないようにする。
+   */
+  _attachKfDrag(el, shotId, kf, markerFrame) {
+    el.style.pointerEvents = 'auto';
+    el.style.cursor = 'ew-resize';
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!this.baked) return;
+      const shot = this.ctx.choreo.data.generate.shots.find((s) => s.id === shotId);
+      const info = this.baked.shots.find((s) => s.id === shotId);
+      if (!shot || !info || !Array.isArray(shot.path)) return;
+      const times = this.pathEditor._ensureTimes(shot);
+      const easeFn = gsap.parseEase(shot.ease || 'none');
+      const rect = this.track.getBoundingClientRect();
+      const total = this.baked.totalFrames;
+      const startX = e.clientX;
+      // 前後キーの通過フレームでクランプ（隣接キーがある時だけ余白±1、端はショット端まで）
+      const mk = info.markers ?? [];
+      const prevM = mk.find((x) => x.kf === kf - 1);
+      const nextM = mk.find((x) => x.kf === kf + 1);
+      const fPrev = prevM ? prevM.frame + 1 : info.startFrame;
+      const fNext = nextM ? nextM.frame - 1 : info.startFrame + info.frameCount;
+      let moved = false;
+      el.setPointerCapture(e.pointerId);
+      this.pathEditor.selectKeyframe(shotId, kf);
+
+      const move = (ev) => {
+        if (Math.abs(ev.clientX - startX) > 3) moved = true;
+        const ratio = Math.max(0, Math.min((ev.clientX - rect.left) / rect.width, 1));
+        let F = ratio * (total - 1);
+        F = Math.max(fPrev, Math.min(F, fNext)); // 隣接キーの間にクランプ
+        const linP = info.frameCount > 0 ? Math.max(0, Math.min((F - info.startFrame) / info.frameCount, 1)) : 0;
+        times[kf] = Number(easeFn(linP).toFixed(4));
+        el.style.left = `${(F / total) * 100}%`;
+        this.readout.textContent = `${shot.id} #${kf}  t ${times[kf].toFixed(3)}（ドラッグ中）`;
+        this._seek(Math.round(F)); // プレイヘッドをマーカーに追従
+      };
+      const up = (ev) => {
+        el.releasePointerCapture(ev.pointerId);
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        if (moved) this.pathEditor.onChanged?.(); // リベイク＋undo（時刻確定）
+        else this._seek(markerFrame); // クリック＝そのキーフレーム位置へシーク（選択は済）
       };
       el.addEventListener('pointermove', move);
       el.addEventListener('pointerup', up);

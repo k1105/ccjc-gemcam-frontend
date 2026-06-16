@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import gsap from 'gsap';
 import {
   buildCurve,
+  isOverlay,
   pathBoundaryNeighbors,
   pathTimes,
   samplePathByTime,
@@ -238,7 +239,7 @@ export class CameraDirector {
     let prevBase = null;
     if (ctx?.shots && ctx.index != null) {
       for (let j = ctx.index - 1; j >= 0; j--) {
-        if (ctx.shots[j].type !== 'static') { prevBase = ctx.shots[j]; break; }
+        if (!isOverlay(ctx.shots[j])) { prevBase = ctx.shots[j]; break; }
       }
     }
     const morphDur =

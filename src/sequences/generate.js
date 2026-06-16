@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { Sequence } from '../core/sequence-manager.js';
+import { isOverlay } from '../core/camera-eval.js';
+import { OverlayScheduler } from '../core/overlay-scheduler.js';
 import { TimerBag, disposeObject3D } from '../core/resources.js';
 import { PhotoParticles } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
@@ -38,7 +40,7 @@ export class GenerateSequence extends Sequence {
     this.bag.add(() => world.removeTickable(lightTick));
 
     // --- カメラを最初の base ショット開始位置へ即時セット（DOM白フラッシュ中） ---
-    const ph0 = gcfg.shots.find((s) => s.type !== 'static') ?? gcfg.shots[0];
+    const ph0 = gcfg.shots.find((s) => !isOverlay(s)) ?? gcfg.shots[0];
     const startKf = ph0.path ? ph0.path[0] : ph0.pos;
     world.camera.position.set(...(Array.isArray(startKf) ? startKf : startKf.p));
     world.camera.fov = ph0.fov ? ph0.fov[0] : world.camera.fov;
@@ -93,6 +95,19 @@ export class GenerateSequence extends Sequence {
     director.registerTarget('bottle', (out) => out.copy(bottleCenter));
     director.registerTarget('heroParticle', (out) => this.particles.getHeroPosition(out));
 
+    // --- overlay カット（割り込み）スケジューラ: base カメラ確定後に絶対時刻で被せる ---
+    const overlayScheduler = new OverlayScheduler(world.camera, {
+      resolveTarget: (name, out) => director._resolveTarget(name, out),
+      offsetFor: (shot) => director._resolveOffset(shot),
+    });
+    overlayScheduler.setShots(gcfg.shots);
+    world.cameraOverride = (dt) => {
+      if (!this.bag.disposed) overlayScheduler.tick(dt);
+    };
+    this.bag.add(() => {
+      world.cameraOverride = null;
+    });
+
     // --- 生成APIは演出と並行して即時開始 ---
     this.apiPromise = api.generateToyImage(brand.slug, apiSnapshotDataUrl, () => {});
     // 本処理は _run 側で await する。それまでに reject した場合の未処理拒否警告を抑止
@@ -115,9 +130,9 @@ export class GenerateSequence extends Sequence {
       const ph = gcfg.shots[i];
       if (this.bag.disposed) return;
 
-      // static は「上に被せる」絶対時刻オーバーレイ。逐次フローには乗せない
-      // （本番でのオーバーレイ再生＝絶対時刻↔弾性ホールドの対応付けは別途）。
-      if (ph.type === 'static') continue;
+      // overlay カット（start 持ち）は「上に被せる」絶対時刻再生。逐次フローには乗せず
+      // OverlayScheduler が world.cameraOverride で base カメラの上に被せる。
+      if (isOverlay(ph)) continue;
 
       if (ph.type === 'path') {
         await director.playPhase(ph, { shots: gcfg.shots, index: i }); // 隣接 path と境界連続化

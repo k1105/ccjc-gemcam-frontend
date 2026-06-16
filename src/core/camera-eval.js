@@ -23,6 +23,16 @@ const _qb = new THREE.Quaternion();
 const _m4 = new THREE.Matrix4();
 const _upv = new THREE.Vector3(0, 1, 0);
 
+/**
+ * overlay（割り込みカット）判定。`start`（絶対秒）を持つショットは base 連続フローには
+ * 乗らず、その絶対時刻区間で base タイムラインを上書きするオーバーレイ＝カットになる。
+ * type は 'static'（固定位置）/ 'path'（移動カット）いずれも取りうる。
+ * base ショット（path/follow/loop の本編）は start を持たない。
+ */
+export function isOverlay(shot) {
+  return shot != null && shot.start != null;
+}
+
 /** 角度を (-π, π] に正規化 */
 export function wrapPi(a) {
   return ((((a + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) - Math.PI;
@@ -130,6 +140,7 @@ export function pathBoundaryNeighbors(shots, index, offsetOf) {
   const res = { prev: null, next: null };
   const self = shots[index];
   if (!self || self.type !== 'path' || !Array.isArray(self.path)) return res;
+  if (isOverlay(self)) return res; // overlay カットは base と境界連続化しない（独立した割り込み）
   const EPS = 0.15;
   const worldOf = (shot, i) => {
     const e = shot.path[i];
@@ -140,14 +151,14 @@ export function pathBoundaryNeighbors(shots, index, offsetOf) {
   const selfLast = worldOf(self, self.path.length - 1);
 
   const prevShot = shots[index - 1];
-  if (prevShot?.type === 'path' && Array.isArray(prevShot.path) && prevShot.path.length >= 2 && selfFirst) {
+  if (prevShot?.type === 'path' && !isOverlay(prevShot) && Array.isArray(prevShot.path) && prevShot.path.length >= 2 && selfFirst) {
     const prevLast = worldOf(prevShot, prevShot.path.length - 1);
     if (prevLast && prevLast.distanceTo(selfFirst) < EPS) {
       res.prev = worldOf(prevShot, prevShot.path.length - 2); // 共有点の手前
     }
   }
   const nextShot = shots[index + 1];
-  if (nextShot?.type === 'path' && Array.isArray(nextShot.path) && nextShot.path.length >= 2 && selfLast) {
+  if (nextShot?.type === 'path' && !isOverlay(nextShot) && Array.isArray(nextShot.path) && nextShot.path.length >= 2 && selfLast) {
     const nextFirst = worldOf(nextShot, 0);
     if (nextFirst && nextFirst.distanceTo(selfLast) < EPS) {
       res.next = worldOf(nextShot, 1); // 共有点の次

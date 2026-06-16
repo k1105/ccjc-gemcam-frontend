@@ -3,6 +3,7 @@ import { PhotoParticles } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
 import { disposeObject3D } from '../core/resources.js';
 import { LightRig } from '../core/light-rig.js';
+import { isOverlay } from '../core/camera-eval.js';
 
 /**
  * タイムラインプレビュー用のサンドボックス generate シーン。
@@ -31,7 +32,7 @@ export class PreviewStage {
   async open(brand) {
     const { world, choreo } = this.ctx;
     const gcfg = choreo.data.generate;
-    const ph0 = gcfg.shots.find((s) => s.type !== 'static') ?? gcfg.shots[0];
+    const ph0 = gcfg.shots.find((s) => !isOverlay(s)) ?? gcfg.shots[0];
 
     // --- generate.enter 鏡像: shot0 開始カメラからフラスタムを満たすプレーン ---
     const camPos = Array.isArray(ph0.path?.[0])

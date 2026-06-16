@@ -35,6 +35,10 @@ export class World {
     // デバッグエディタのタイムラインプレビューがカメラを占有している間 true。
     // カメラを毎フレーム動かす常駐 tick（SELECT のドリフト等）はこれを尊重する
     this.cameraLocked = false;
+    // 全 tickable 実行後・render 直前に呼ばれるカメラ最終上書きフック。
+    // overlay カット（割り込み）が base カメラの上に被さるために使う（GENERATE で設定）。
+    // (dt:number, elapsed:number) => void
+    this.cameraOverride = null;
 
     this._onResize = this._onResize.bind(this);
     window.addEventListener('resize', this._onResize);
@@ -62,6 +66,8 @@ export class World {
     for (const fn of this.tickables) {
       fn(dt, elapsed);
     }
+    // base カメラ確定後に overlay カットを上書き（tick 追加順に依存せず必ず最後に被さる）
+    if (this.cameraOverride) this.cameraOverride(dt, elapsed);
 
     this.renderer.render(this.scene, this.camera);
   }

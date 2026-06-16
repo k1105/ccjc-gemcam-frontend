@@ -13,7 +13,8 @@
     "firebase:check": "node scripts/check-firebase.mjs",
     "gemini:check": "node scripts/check-gemini.mjs",
     "flow:check": "node scripts/check-flow.mjs",
-    "cam:check": "node scripts/check-camera-eval.mjs"
+    "cam:check": "node scripts/check-camera-eval.mjs",
+    "overlay:check": "node scripts/check-overlay.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

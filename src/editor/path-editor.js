@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { buildCurve, kfPos, kfHandle, pathTimes, pathBoundaryNeighbors } from '../core/camera-eval.js';
+import { buildCurve, kfPos, kfHandle, pathTimes, pathBoundaryNeighbors, isOverlay } from '../core/camera-eval.js';
 
 const _ndc = new THREE.Vector2();
 
@@ -123,12 +123,13 @@ export class PathEditor {
     // 選択はタイムラインのブロック/◆クリック・3Dクリックで。選択中はタイムライン枠で表示）
     this.shotsFolder = this.gui.addFolder('Shots（再生順・管理）');
     const acts = {
-      addStatic: () => this._addShot(),
+      addPathCut: () => this._addPathShot(),
       up: () => this._moveShot(-1),
       down: () => this._moveShot(1),
       remove: () => this._removeShot(),
     };
-    this.shotsFolder.add(acts, 'addStatic').name('＋ 定点ショット（シークバー位置に被せる）');
+    // カット（割り込み）追加。固定カメラにしたい時は2アンカーを同位置にすれば定点になる
+    this.shotsFolder.add(acts, 'addPathCut').name('＋ カット（シークバー位置に割り込み）');
     this.shotsFolder.add(acts, 'up').name('↑ 前へ移動');
     this.shotsFolder.add(acts, 'down').name('↓ 後へ移動');
     this.shotsFolder.add(acts, 'remove').name('🗑 ショット削除');
@@ -339,6 +340,9 @@ export class PathEditor {
     this.kfFolder.add(this.state, 'addKeyframe').name('＋ keyframe（シークバー位置に追加）');
     this.kfFolder.add(this.state, 'removeKeyframe').name('− keyframe（選択を削除）');
 
+    // overlay（パスカット）は start/duration で割り込み位置と尺を編集
+    if (isOverlay(phase)) this._addOverlayTimingControls(this.kfFolder, phase);
+
     if (entry === '@current') {
       this.kfFolder.add({ info: '実行時カメラ位置（編集不可）' }, 'info').name('type').disable();
       return;
@@ -418,6 +422,13 @@ export class PathEditor {
           })
       );
     }
+  }
+
+  /** パスカット（overlay path）の割り込み timing 制御（start / duration） */
+  _addOverlayTimingControls(folder, shot) {
+    const f = folder.addFolder('timing（割り込み・カット）');
+    f.add(shot, 'start', 0, 60, 0.05).name('start（開始秒・被せ位置）').onChange(() => this.onChanged?.());
+    f.add(shot, 'duration', 0.1, 10, 0.1).name('duration（秒）').onChange(() => this.onChanged?.());
   }
 
   // ---- static（定点）ショット ----
@@ -1238,24 +1249,27 @@ export class PathEditor {
   }
 
   /**
-   * 定点(static)オーバーレイを追加して選択する。
-   * シークバー（プレイヘッド）位置から start で被せ、playhead が乗っている base
-   * ショットの直後に挿入する（配列順は表示用。実時刻は start が決める）。
+   * パスカット（移動する割り込みカット）を追加して選択する。
+   * 定点ショットと同じく start（絶対秒）で base タイムラインに被せる overlay だが、
+   * type:'path' なので2点以上のベジェ曲線パスを持ち、通常のカメラパスと同じ編集
+   * （アンカー追加=k / ハンドル / 時刻 times）ができる。シークバー位置を start にする。
    */
-  _addShot() {
+  _addPathShot() {
     const shots = this._shots();
     const tl = this.timeline;
-    const start = tl?.isOpen && tl.baked ? Number(tl.currentTime.toFixed(3)) : 0; // シークバー位置から開始
+    const start = tl?.isOpen && tl.baked ? Number(tl.currentTime.toFixed(3)) : 0;
     const phId = this._playheadShotId();
     const idx = phId ? shots.findIndex((s) => s.id === phId) : -1;
     const at = idx >= 0 ? idx + 1 : shots.length;
-    const id = this._uniqueId('static');
+    const id = this._uniqueId('pathcut');
     const shot = {
       id,
-      type: 'static',
+      type: 'path',
       start,
       duration: 2.0,
-      pos: [0, 1, 3],
+      ease: 'power2.inOut',
+      path: [[0, 1, 3], [1, 1.2, 2.5]],
+      times: [0, 1],
       lookAt: { mode: 'fixed', point: [0, 0.5, 0] },
       fov: 45,
     };
@@ -1798,9 +1812,10 @@ export class PathEditor {
   }
 
   /**
-   * キーフレーム（アンカー）追加。シークバー（プレイヘッド）が乗っている path ショットの、
-   * その時刻のカメラ位置＝曲線上の点に新しいアンカーを挿入する。
-   * - playhead 位置の base ショットを対象にする（path 以外なら不可メッセージ）
+   * キーフレーム（アンカー）追加。対象 path ショットの、シークバー時刻のカメラ位置＝
+   * 曲線上の点に新しいアンカーを挿入する。
+   * - 選択中が overlay（パスカット）path ならそのカットを対象にする（その窓内にクランプ）
+   * - そうでなければ playhead 位置の base ショットを対象にする（path 以外なら不可メッセージ）
    * - 挿入位置は playhead 直前のアンカーの直後（markers の通過フレームで判定）
    * - タイムライン未起動時は従来の中点挿入にフォールバック
    */
@@ -1809,31 +1824,42 @@ export class PathEditor {
     if (!tl?.isOpen || !tl.baked) return this._addKeyframeMidpoint();
 
     const F = Math.round(tl.frame);
-    const info = tl._phaseAt(F); // playhead が乗っている base ショット情報
-    const shot = info && this._shots().find((s) => s.id === info.id);
-    if (!shot) return;
+    // 選択中が overlay path ならそのカットへ、そうでなければ playhead 下の base ショットへ
+    const selShot = this._currentShot();
+    let info, shot;
+    if (selShot && isOverlay(selShot) && Array.isArray(selShot.path)) {
+      info = tl.baked.shots.find((s) => s.id === selShot.id);
+      shot = selShot;
+    } else {
+      info = tl._phaseAt(F);
+      shot = info && this._shots().find((s) => s.id === info.id);
+    }
+    if (!shot || !info) return;
     if (!Array.isArray(shot.path)) {
       tl._flashMessage?.('ホールド(follow/loop)ショットにはアンカーを追加できません');
       return;
     }
 
+    // overlay は playhead がカット窓の外にもなり得るので、窓内へクランプして評価する
+    const Fc = Math.max(info.startFrame, Math.min(F, info.startFrame + info.frameCount - 1));
+
     // playhead 直前のアンカー index（markers の通過フレームから）
     let prevKf = 0;
-    for (const m of info.markers ?? []) if (m.frame <= F) prevKf = m.kf;
+    for (const m of info.markers ?? []) if (m.frame <= Fc) prevKf = m.kf;
 
     // 新アンカー = その時刻のベイク済みカメラ位置（曲線上）。relativeTo はローカルへ戻す
     const off = this._shotOffset(shot);
     const local = new THREE.Vector3(
-      tl.baked.pos[F * 3],
-      tl.baked.pos[F * 3 + 1],
-      tl.baked.pos[F * 3 + 2]
+      tl.baked.pos[Fc * 3],
+      tl.baked.pos[Fc * 3 + 1],
+      tl.baked.pos[Fc * 3 + 2]
     ).sub(off);
     const anchor = [Number(local.x.toFixed(3)), Number(local.y.toFixed(3)), Number(local.z.toFixed(3))];
 
     // 到達時刻 t = シークバー位置の eased 進行（前後アンカーの t の間にクランプ）
     const times = this._ensureTimes(shot);
     const easeFn = gsap.parseEase(shot.ease || 'none');
-    const linP = info.frameCount > 0 ? (F - info.startFrame) / info.frameCount : 0;
+    const linP = info.frameCount > 0 ? (Fc - info.startFrame) / info.frameCount : 0;
     const tPrev = times[prevKf] ?? 0;
     const tNext = times[prevKf + 1] ?? 1;
     let t = easeFn(Math.max(0, Math.min(linP, 1)));

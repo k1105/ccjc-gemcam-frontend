@@ -1883,6 +1883,80 @@ export class PathEditor {
     this.onChanged?.();
   }
 
+  // ====================== k / delete キーフレーム操作 ======================
+  // k=現在時刻にキーフレーム追加 / delete=選択キーフレーム削除。
+  // 対象は「アクティブな要素」＝選択状態（this.sel / 選択ショット）で切り替える。
+
+  /**
+   * k / delete が対象にする「アクティブな要素」種別を選択状態から判定。
+   *   'light' … ライト選択中（色/強度キーフレーム）
+   *   'aim'   … 定点ショットの注視点パン（lookAt.keys）
+   *   'path'  … カメラパス（既定。プレイヘッド下の path ショットのアンカー）
+   */
+  _activeKeyTarget() {
+    if ((this.sel?.kind === 'light-pos' || this.sel?.kind === 'light-target') && this._currentLight()) {
+      return 'light';
+    }
+    const shot = this._currentShot();
+    if (shot?.type === 'static' && Array.isArray(shot.lookAt?.keys)) return 'aim';
+    return 'path';
+  }
+
+  /** k: アクティブな要素に現在時刻のキーフレームを追加（処理したら true） */
+  _addKeyframeActive() {
+    switch (this._activeKeyTarget()) {
+      case 'light': {
+        const lt = this._currentLight();
+        let did = false;
+        for (const [prop, kind] of [['intensityKeys', 'scalar'], ['colorKeys', 'color']]) {
+          if (Array.isArray(lt[prop]) && lt[prop].length) {
+            this._addLightKey(lt, prop, kind);
+            did = true;
+          }
+        }
+        if (!did) this.timeline?._flashMessage?.('このライトはキーフレーム化されていません（パネルで有効化）');
+        return true;
+      }
+      case 'aim':
+        this._addAimKey();
+        return true;
+      default:
+        this._addKeyframe();
+        return true;
+    }
+  }
+
+  /** delete: アクティブな要素の選択中キーフレームを削除（処理したら true） */
+  _removeKeyframeActive() {
+    switch (this._activeKeyTarget()) {
+      case 'light':
+        return this._removeNearestLightKey(this._currentLight());
+      case 'aim':
+        this._removeAimKey();
+        return true;
+      default:
+        this._removeKeyframe();
+        return true;
+    }
+  }
+
+  /** プレイヘッド（現在時刻）に最も近いライトキーを色/強度トラックから1つ削除 */
+  _removeNearestLightKey(lt) {
+    const now = this.timeline?.currentTime ?? 0;
+    let best = null;
+    for (const prop of ['intensityKeys', 'colorKeys']) {
+      const keys = lt?.[prop];
+      if (!Array.isArray(keys)) continue;
+      keys.forEach((k, idx) => {
+        const d = Math.abs((k.t ?? 0) - now);
+        if (!best || d < best.d) best = { prop, idx, d };
+      });
+    }
+    if (!best) return false;
+    this._removeLightKey(lt, best.prop, best.idx);
+    return true;
+  }
+
   /** ショット単体プレビュー */
   _preview() {
     const { director, manager, choreo } = this.ctx;
@@ -1938,6 +2012,8 @@ export class PathEditor {
       let started = false;
       if (k === 'g' || k === 'G') started = this._startModal('translate');
       else if (k === 'r' || k === 'R') started = this._startModal('rotate');
+      else if (k === 'k' || k === 'K') started = this._addKeyframeActive();
+      else if (k === 'Delete' || k === 'Backspace') started = this._removeKeyframeActive();
       if (started) {
         e.preventDefault();
         e.stopPropagation();

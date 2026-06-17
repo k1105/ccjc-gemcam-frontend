@@ -85,6 +85,7 @@ export class Editor {
     // scene:true でプレビューの粒を再構築する
     const particlesFolder = this.gui.addFolder('particles');
     buildGuiFromObject(particlesFolder, choreo.data.generate.particles, {
+      labels: PARTICLE_LABELS,
       onChange: () => {
         this.timeline.invalidate({ scene: true });
         touch();
@@ -320,18 +321,20 @@ function rangeFor(v) {
  * JSONオブジェクトを再帰的に lil-gui コントローラへ変換する。
  * 数値→スライダー / 文字列→テキスト / 真偽→チェック / 数値配列→インデックス別スライダー
  */
-function buildGuiFromObject(folder, obj, { skipKeys = [], onChange } = {}) {
+function buildGuiFromObject(folder, obj, { skipKeys = [], onChange, labels = {} } = {}) {
+  // labels[key] があれば表示名だけ差し替える（JSONキー自体は uniform マッピングに使うため変えない）
+  const nameOf = (key) => labels[key] ?? key;
   for (const [key, val] of Object.entries(obj)) {
     if (skipKeys.includes(key)) continue;
 
     if (typeof val === 'number') {
       const [min, max] = rangeFor(val);
-      folder.add(obj, key, min, max, 0.01).onChange(onChange);
+      folder.add(obj, key, min, max, 0.01).name(nameOf(key)).onChange(onChange);
     } else if (typeof val === 'string' || typeof val === 'boolean') {
-      folder.add(obj, key).onChange(onChange);
+      folder.add(obj, key).name(nameOf(key)).onChange(onChange);
     } else if (Array.isArray(val)) {
       if (val.length && val.every((x) => typeof x === 'number')) {
-        const sub = folder.addFolder(key);
+        const sub = folder.addFolder(nameOf(key));
         // 配列へ直接バインド（proxy を使わない）。undo の updateDisplay で復元値が反映される
         val.forEach((x, i) => {
           const [min, max] = rangeFor(x);
@@ -339,18 +342,49 @@ function buildGuiFromObject(folder, obj, { skipKeys = [], onChange } = {}) {
         });
         sub.close();
       } else if (val.length && val.every((x) => x && typeof x === 'object')) {
-        const sub = folder.addFolder(key);
+        const sub = folder.addFolder(nameOf(key));
         val.forEach((item, i) => {
           const label = item.id ?? item.el ?? String(i);
-          buildGuiFromObject(sub.addFolder(label), item, { skipKeys, onChange });
+          buildGuiFromObject(sub.addFolder(label), item, { skipKeys, onChange, labels });
         });
         sub.close();
       }
       // 混在配列（"@current" を含む path 等）はスキップ
     } else if (val && typeof val === 'object') {
-      const sub = folder.addFolder(key);
-      buildGuiFromObject(sub, val, { skipKeys, onChange });
+      const sub = folder.addFolder(nameOf(key));
+      buildGuiFromObject(sub, val, { skipKeys, onChange, labels });
       sub.close();
     }
   }
 }
+
+// パーティクルのパラメータ表示名（日本語）。lil-gui のラベルだけ差し替える辞書。
+// キー = choreography.json の particles キー。未定義のキーは英語キーのまま表示される。
+const PARTICLE_LABELS = {
+  grid: 'グリッド数 [幅, 高さ]',
+  size: '粒サイズ',
+  sizeGrow: '成長量',
+  surviveRatio: '生存率',
+  rippleLead: '波・開始遅延',
+  rippleAmp: '波・振幅',
+  rippleFreq: '波・周波数 [x, y]',
+  rippleSpeed: '波・速度',
+  dissolveDelaySpread: '飛散の遅延ばらつき',
+  headLead: '先頭の車間',
+  flightDuration: '飛行時間',
+  lateralRadius: '横ずれ半径',
+  twist: 'ねじれ',
+  noiseAmp: 'ゆらぎ・振幅',
+  noiseFreq: 'ゆらぎ・周波数',
+  streamP1Offset: '流路の制御点P1',
+  streamP2Offset: '流路の制御点P2',
+  helixEntryTangent: '螺旋・入射の接線強さ',
+  helixRadius: '螺旋・半径',
+  helixSpeed: '螺旋・速度',
+  helixEntryY: '螺旋・入口の高さ',
+  helixBobAmp: '螺旋・上下ゆれ振幅',
+  helixBobFreq: '螺旋・上下ゆれ周波数',
+  helixDescent: '螺旋・下降速度',
+  helixDrop: '螺旋・最大下降量',
+  helixFade: '螺旋・消えるまでの時間',
+};

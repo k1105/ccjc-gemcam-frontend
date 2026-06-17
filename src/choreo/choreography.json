@@ -1,7 +1,7 @@
 {
   "version": 1,
   "select": {
-    "rack": { "spacing": 0.62, "y": -0.45, "z": 0.0, "idleSwayAmp": 0.018, "idleSwaySpeed": 0.9 },
+    "rack": { "spacing": 0.41, "y": -0.37, "z": 0.79, "idleSwayAmp": 0.018, "idleSwaySpeed": 0.9 },
     "sink": { "duration": 1.5, "rotations": 2.5, "dropY": -2.4, "ease": "power2.in", "preDelay": 0.15, "postDelay": 0.35 },
     "return": { "perBottle": 0.55, "stagger": 0.16, "fromY": -2.6, "rotations": 1.0, "ease": "power3.out" },
     "camera": { "pos": [0, 0.3, 4.6], "look": [0, 0.0, 0], "fov": 42, "driftAmp": 0.06, "driftSpeed": 0.25 }
@@ -28,7 +28,8 @@
       "noiseAmp": 0.06,
       "noiseFreq": 0.7,
       "streamP1Offset": [0.6, 1.5, 0.8],
-      "streamP2Offset": [-0.8, -0.3, -0.6],
+      "streamP2Offset": [0, 0, 0],
+      "helixEntryTangent": 0.4,
       "helixRadius": 0.55,
       "helixSpeed": 4.8,
       "helixEntryY": 0.6,

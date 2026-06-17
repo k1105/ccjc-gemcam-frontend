@@ -29,6 +29,50 @@ export async function createBottle(brand) {
   }
 }
 
+/**
+ * ブランドの商品画像（public/brands/*）を板ポリゴンとして生成する。
+ * createBottle と同じ規約（原点=底中心、高さ TARGET_HEIGHT）に揃えるので、
+ * BottleRack のレイアウト・揺れ・沈下アニメーションがそのまま流用できる。
+ *
+ * 返り値: THREE.Group（原点=画像下端中心）
+ */
+const texLoader = new THREE.TextureLoader();
+
+export async function createBottlePlane(brand) {
+  // brands.json の productImage は "public/brands/xxx.png"。public 配下は Vite がルート配信する
+  const imgUrl = '/' + brand.productImage.replace(/^\/?public\//, '');
+  try {
+    const tex = await texLoader.loadAsync(imgUrl);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+
+    const img = tex.image;
+    const aspect = img.width > 0 && img.height > 0 ? img.width / img.height : 1;
+    const height = TARGET_HEIGHT;
+    const width = height * aspect;
+
+    const geo = new THREE.PlaneGeometry(width, height);
+    geo.translate(0, height / 2, 0); // 原点を下端中心へ
+    // 透過PNG前提: 完全透明な背景は alphaTest で破棄し、半透明エッジは blend で残す。
+    // 回さない（常に正面）ので片面描画でよい。
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      alphaTest: 0.1,
+      side: THREE.FrontSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    const root = new THREE.Group();
+    root.add(mesh);
+    return root;
+  } catch (err) {
+    // 画像欠落はラック全体を巻き込まず、該当ブランドのみ空表示にする
+    console.error(`[bottle-factory] 画像ロード失敗: ${imgUrl}`, err);
+    return new THREE.Group();
+  }
+}
+
 // GLB は出所によって原点・サイズがまちまちなので、
 // 共通規約（原点=底中心、高さ TARGET_HEIGHT）に揃える
 const TARGET_HEIGHT = 0.8;

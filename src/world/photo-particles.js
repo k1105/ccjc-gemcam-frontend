@@ -11,8 +11,8 @@ const TAU = Math.PI * 2;
  *     hero は遅延の厳密な最小値を持ち（headLead の車間付き）、先鋒より先に
  *     粒は出ない。横ずれ半径は先頭からの遅れに比例し、先端が細く尾に向かって
  *     広がる錐形（コーン）の彗星になる。先鋒(hero)をカメラが追従
- *  3. ヘリックス: ベジェ終端はボトル周囲の螺旋パスに接続しており、彗星は
- *     先鋒を保ったまま1本のリボンとしてボトルに巻き付き、進行に応じてフェードする。
+ *  3. ヘリックス: ベジェ終端はボトル周囲の螺旋パスに接線連続(C1)で接続しており、彗星は
+ *     螺旋に「接するように」入射して巻き付き（中腹へ突っ込まない）、進行に応じてフェードする。
  *     （粒ごとに別軌道へ散らない＝雲にならない）
  *
  * - 単一 THREE.Points + ShaderMaterial（円形スプライト）、1ドローコール
@@ -171,11 +171,15 @@ export class PhotoParticles {
     const center = this._target;
     const p0 = this._planeCenter.clone();
 
-    // ヘリックスのエントリ角: ストリームの進入方向の延長線上からボトルへ巻き始める
+    // ヘリックスのエントリ角: 入口での螺旋接線が彗星の進入方向(approach)と「同方向」に
+    // なる点を選ぶ。こうすると彗星は中心へ突っ込まず、車が環状交差点に合流するように
+    // 螺旋へ接して入射できる（進入方向に直交する旧来の点だと裏へ回り込むループになる）。
+    // 螺旋の水平速度は sign(speed)*(-sinθ, cosθ) ∝ approach となる θ を解く。
     const approach = center.clone().sub(p0);
     approach.y = 0;
     approach.normalize();
-    const theta0 = Math.atan2(-approach.z, -approach.x); // 進入方向の手前側から巻き込む
+    const sp = Math.sign(cfg.helixSpeed) || 1;
+    const theta0 = Math.atan2(-approach.x * sp, approach.z * sp);
     const y0 = center.y + cfg.helixEntryY;
     const p3 = new THREE.Vector3(
       center.x + Math.cos(theta0) * cfg.helixRadius,
@@ -183,8 +187,21 @@ export class PhotoParticles {
       center.z + Math.sin(theta0) * cfg.helixRadius
     );
 
+    // ヘリックス入口での接線（s2=0 の helixPos 微分方向）。彗星がこの向きで p3 に
+    // 到達するようベジェ終端ハンドル p2 を接線の逆向きに置くと、半径方向から「突っ込む」
+    // のではなく螺旋に接するように入射できる（C1 連続）。
+    const entryTan = new THREE.Vector3(
+      -Math.sin(theta0) * cfg.helixSpeed * cfg.helixRadius,
+      -cfg.helixDescent + cfg.helixBobFreq * cfg.helixBobAmp,
+      Math.cos(theta0) * cfg.helixSpeed * cfg.helixRadius
+    ).normalize();
+    const handle = p3.distanceTo(p0) * (cfg.helixEntryTangent ?? 0.4);
+
     const p1 = p0.clone().lerp(p3, 0.33).add(new THREE.Vector3(...cfg.streamP1Offset));
-    const p2 = p0.clone().lerp(p3, 0.66).add(new THREE.Vector3(...cfg.streamP2Offset));
+    const p2 = p3
+      .clone()
+      .addScaledVector(entryTan, -handle)
+      .add(new THREE.Vector3(...cfg.streamP2Offset));
 
     const dir = p3.clone().sub(p0).normalize();
     const side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();

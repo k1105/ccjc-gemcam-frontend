@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
-import { createBottle } from './bottle-factory.js';
+import { createBottlePlane } from './bottle-factory.js';
 
 /**
  * 10本のボトルラインナップ。アプリ起動時に1度だけ構築し、ループをまたいで再利用する。
@@ -22,7 +22,7 @@ export class BottleRack {
     const n = this.brands.list.length;
     const totalWidth = cfg.spacing * (n - 1);
 
-    const created = await Promise.all(this.brands.list.map((b) => createBottle(b)));
+    const created = await Promise.all(this.brands.list.map((b) => createBottlePlane(b)));
 
     created.forEach((model, i) => {
       const brand = this.brands.list[i];
@@ -65,7 +65,7 @@ export class BottleRack {
     let i = 0;
     for (const { spin } of this.bottles.values()) {
       const phase = i * 0.7;
-      spin.rotation.y = Math.sin(elapsed * cfg.idleSwaySpeed + phase) * 0.35 + phase;
+      // 画像板なので Y回転（くるくる）はせず、上下の浮遊だけ残す
       spin.position.y = Math.sin(elapsed * cfg.idleSwaySpeed * 1.3 + phase) * cfg.idleSwayAmp;
       i++;
     }
@@ -86,11 +86,7 @@ export class BottleRack {
     this.swayEnabled = false;
     return new Promise((resolve) => {
       const tl = bag.timeline({ onComplete: resolve });
-      tl.to(entry.spin.rotation, {
-        y: entry.spin.rotation.y + Math.PI * 2 * cfg.rotations,
-        duration: cfg.duration,
-        ease: 'power1.in',
-      }, cfg.preDelay);
+      // 画像板なので回転はさせず、下へ沈める動きだけ
       tl.to(entry.root.position, {
         y: cfg.dropY,
         duration: cfg.duration,
@@ -147,11 +143,6 @@ export class BottleRack {
         }, start);
         tl.fromTo(entry.root.position,
           { x: entry.baseX, y: cfg.fromY },
-          { y: 0, duration: cfg.perBottle, ease: cfg.ease },
-          start
-        );
-        tl.fromTo(entry.spin.rotation,
-          { y: -Math.PI * 2 * cfg.rotations },
           { y: 0, duration: cfg.perBottle, ease: cfg.ease },
           start
         );

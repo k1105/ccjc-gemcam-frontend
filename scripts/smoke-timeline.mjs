@@ -90,9 +90,11 @@ await page.keyboard.press('ArrowLeft');
 const d = await campos();
 assert(JSON.stringify(d) === JSON.stringify(a), '← で1フレーム戻る（=frame120）');
 
-console.log('--- scrub to follow phase (particles visible)');
+console.log('--- scrub to hold phase (particles visible)');
 const followStart = await page.evaluate(() => {
-  const p = window.app.editor.timeline.baked.shots.find((x) => x.type === 'follow');
+  const p = window.app.editor.timeline.baked.shots.find(
+    (x) => x.type === 'loop' || x.type === 'follow'
+  );
   return p.startFrame + Math.floor(p.frameCount / 2);
 });
 await seek(followStart);
@@ -155,8 +157,8 @@ await page.waitForTimeout(600);
 const framesAfter = await page.evaluate(() => window.app.editor.timeline.baked.totalFrames);
 assert(framesAfter === framesBefore + 60, `値変更で自動リベイク (${framesBefore} -> ${framesAfter})`);
 
-console.log('--- click base block to select shot (incl. follow) ---');
-const obBox = await page.$eval('.tlx-phase[data-shot="orbitFollow"]', (el) => {
+console.log('--- click base block to select shot (incl. loop hold) ---');
+const obBox = await page.$eval('.tlx-phase[data-shot="bottleOrbit"]', (el) => {
   const r = el.getBoundingClientRect();
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 });
@@ -164,9 +166,9 @@ await page.mouse.click(obBox.x, obBox.y);
 await page.waitForTimeout(300);
 const blkSel = await page.evaluate(() => ({
   id: window.app.editor.pathEditor.state.phaseId,
-  hi: !!document.querySelector('.tlx-phase[data-shot="orbitFollow"].tlx-selected'),
+  hi: !!document.querySelector('.tlx-phase[data-shot="bottleOrbit"].tlx-selected'),
 }));
-assert(blkSel.id === 'orbitFollow', `follow ブロッククリックで選択 (${blkSel.id})`);
+assert(blkSel.id === 'bottleOrbit', `loop ブロッククリックで選択 (${blkSel.id})`);
 assert(blkSel.hi, 'クリックしたブロックが枠ハイライト');
 
 console.log('--- add/remove a static shot @playhead (Phase4b)');

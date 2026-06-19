@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "select": {
     "rack": { "spacing": 0.41, "y": -0.37, "z": 0.79, "idleSwayAmp": 0.018, "idleSwaySpeed": 0.9 },
     "sink": { "duration": 1.5, "rotations": 2.5, "dropY": -2.4, "ease": "power2.in", "preDelay": 0.15, "postDelay": 0.35 },
@@ -64,19 +64,24 @@
         "lookAt": { "mode": "target", "target": "heroParticle", "lerp": 0.085 }
       },
       {
-        "id": "orbitFollow",
-        "type": "follow",
-        "target": "heroParticle",
-        "center": "bottle",
-        "radiusOffset": 0.15,
-        "angleLag": 0.85,
-        "heightOffset": 0.4,
-        "blendIn": 1.2,
-        "headHeightInfluence": 1.0,
-        "lookBlend": 0.9,
-        "posLerp": 0.22,
-        "minHold": 5.0,
-        "lookAt": { "mode": "target", "target": "heroParticle", "lerp": 0.45 }
+        "id": "bottleOrbit",
+        "type": "loop",
+        "relativeTo": "bottle",
+        "closed": true,
+        "loopDuration": 6.0,
+        "exitPoints": 12,
+        "minHoldProgress": 0.0,
+        "lookAt": { "mode": "target", "target": "heroParticle", "lerp": 0.2 },
+        "path": [
+          [2.4, -0.15, 0.0],
+          [1.7, -0.15, 1.7],
+          [0.0, -0.15, 2.4],
+          [-1.7, -0.15, 1.7],
+          [-2.4, -0.15, 0.0],
+          [-1.7, -0.15, -1.7],
+          [0.0, -0.15, -2.4],
+          [1.7, -0.15, -1.7]
+        ]
       },
       {
         "id": "pullBack",

@@ -46,9 +46,15 @@ export async function createBottlePlane(brand) {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
 
+    // 背景が不透明な商品画像（例: Aquarius / Ayataka）には、別途用意した
+    // シルエットのアルファマップ "{name}-alpha.png" で切り抜きをかける。
+    // 用意が無いブランドは 404 になるので、その場合は黙って従来どおり map のαに任せる。
+    const alphaMap = await loadAlphaMap(imgUrl);
+
     const img = tex.image;
     const aspect = img.width > 0 && img.height > 0 ? img.width / img.height : 1;
-    const height = TARGET_HEIGHT;
+    // Sprite だけ元画像のボトルが大きく写っており、他と高さが揃わないので 0.85 倍に縮める
+    const height = TARGET_HEIGHT * (HEIGHT_SCALE[brand.slug] ?? 1);
     const width = height * aspect;
 
     const geo = new THREE.PlaneGeometry(width, height);
@@ -57,6 +63,7 @@ export async function createBottlePlane(brand) {
     // 回さない（常に正面）ので片面描画でよい。
     const mat = new THREE.MeshBasicMaterial({
       map: tex,
+      alphaMap,
       transparent: true,
       alphaTest: 0.1,
       side: THREE.FrontSide,
@@ -73,9 +80,31 @@ export async function createBottlePlane(brand) {
   }
 }
 
+/**
+ * 商品画像 URL から "{name}-alpha.png" を導出してアルファマップを読む。
+ * alphaMap は輝度（白=不透明 / 黒=透明）を α として使うデータテクスチャなので、
+ * sRGB ではなくリニア（NoColorSpace）で扱う。未用意のブランドは 404 → null。
+ */
+async function loadAlphaMap(imgUrl) {
+  const alphaUrl = imgUrl.replace(/\.[^./]+$/, '-alpha.png');
+  try {
+    const alpha = await texLoader.loadAsync(alphaUrl);
+    alpha.colorSpace = THREE.NoColorSpace;
+    alpha.anisotropy = 4;
+    return alpha;
+  } catch {
+    return null;
+  }
+}
+
 // GLB は出所によって原点・サイズがまちまちなので、
 // 共通規約（原点=底中心、高さ TARGET_HEIGHT）に揃える
 const TARGET_HEIGHT = 0.8;
+
+// 商品画像ごとのボトルの写り方の差を吸収する、ブランド別の高さ補正（未指定は 1）
+const HEIGHT_SCALE = {
+  sprite: 0.85,
+};
 
 function normalizeGlbModel(model) {
   const box = new THREE.Box3().setFromObject(model);

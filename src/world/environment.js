@@ -32,7 +32,10 @@ export function createEnvironment(scene) {
   // 影だけを受ける白床（背景と同化し、ボトルの接地感のみ与える）
   const shadowFloor = new THREE.Mesh(
     new THREE.PlaneGeometry(40, 40),
-    new THREE.ShadowMaterial({ opacity: 0.12 })
+    // depthWrite を切る: 影だけ受ける床なので深度は書かない。
+    // これを書くと、SELECTで沈むボトルが床ライン（≒足元 y=-0.45）で
+    // 深度オクルージョンされ、画面下端まで届かず見切れてしまう。
+    new THREE.ShadowMaterial({ opacity: 0.12, depthWrite: false })
   );
   shadowFloor.rotation.x = -Math.PI / 2;
   shadowFloor.position.y = -0.45;

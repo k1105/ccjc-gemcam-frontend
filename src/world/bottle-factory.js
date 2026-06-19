@@ -1,16 +1,44 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
 /**
  * ブランドごとのボトル3Dモデルを /models/{slug}.glb からロードする。
  * slug は config/brands.json と public/models/ のファイル名で一致させる規約。
  *
+ * 例外的に FBX を使うブランドは FBX_MODELS に slug → ファイル名 を登録する。
+ *
  * 返り値: THREE.Group（原点=ボトル底中心、高さ ~0.8 ワールド単位）
  */
 
+// GLB ではなく FBX を使うブランド（生成中の表示モデル差し替え用）
+const FBX_MODELS = {
+  ilohas: 'ilohas.fbx',
+};
+
 const gltfLoader = new GLTFLoader();
+const fbxLoader = new FBXLoader();
 
 export async function createBottle(brand) {
+  const fbxName = FBX_MODELS[brand.slug];
+  if (fbxName) {
+    const fbxUrl = `/models/${fbxName}`;
+    try {
+      // FBXLoader.loadAsync は Group を直接返す（GLTF と違い .scene は無い）
+      const model = await fbxLoader.loadAsync(fbxUrl);
+      model.traverse((o) => {
+        if (o.isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = false;
+        }
+      });
+      return normalizeGlbModel(model);
+    } catch (err) {
+      console.error(`[bottle-factory] FBXロード失敗: ${fbxUrl}`, err);
+      return new THREE.Group();
+    }
+  }
+
   const glbUrl = `/models/${brand.slug}.glb`;
   try {
     const gltf = await gltfLoader.loadAsync(glbUrl);

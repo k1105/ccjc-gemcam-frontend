@@ -34,3 +34,6 @@ scripts/_gemini-test-output.*
 *.sw?
 
 .smoke/
+
+# ローカル控え（撮影 raw 画像 / 生成結果のバックアップ）
+local-archive/

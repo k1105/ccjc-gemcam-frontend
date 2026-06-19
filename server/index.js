@@ -6,6 +6,7 @@ import express from 'express';
 import cors from 'cors';
 import { generateToyImage } from './gemini.js';
 import { putImage } from './storage.js';
+import { saveLocalImage } from './local-store.js';
 import { saveGeneration } from './firestore.js';
 import { getBrand, brands } from './brands.js';
 
@@ -54,8 +55,25 @@ app.post('/api/generate', async (req, res) => {
 
     const { mime, base64 } = parseDataUrl(image);
 
+    // raw/generated でファイル名を揃え、後から対応を追えるようにする。
+    const baseName = `${brand.slug}-${Date.now()}`;
+
+    // 撮影 raw 画像を手元へ控える（失敗しても生成は止めない）。
+    try {
+      await saveLocalImage(Buffer.from(base64, 'base64'), 'raw', baseName, mime);
+    } catch (localErr) {
+      console.warn('[generate] raw のローカル保存に失敗:', localErr.message);
+    }
+
     // 1. 生成
     const { buffer, mimeType } = await generateToyImage(brand.slug, base64, mime);
+
+    // 生成結果を手元へ控える（失敗しても生成は止めない）。
+    try {
+      await saveLocalImage(buffer, 'generated', baseName, mimeType);
+    } catch (localErr) {
+      console.warn('[generate] generated のローカル保存に失敗:', localErr.message);
+    }
 
     // 2. ストレージ保存 + Firestore 記録
     // Storage 側の障害・未設定で保存に失敗しても生成自体は成功しているので、

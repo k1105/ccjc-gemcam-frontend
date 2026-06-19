@@ -19,6 +19,7 @@ export class Overlay {
       image: document.getElementById('result-image'),
       textBL: document.getElementById('result-text-bl'),
       logoTR: document.getElementById('result-logo-tr'),
+      logoImg: document.getElementById('result-logo-img'),
       brandBR: document.getElementById('result-brand-br'),
     };
   }

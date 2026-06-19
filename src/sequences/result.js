@@ -16,6 +16,20 @@ const JP_NAMES = {
   toreta: 'トレタ',
 };
 
+/** 右上ロゴ画像。slug と public/logos/{file} を対応させる（拡張子はファイルごとに異なる） */
+const LOGO_FILES = {
+  'coca-cola': 'coca-cola.png',
+  'coca-cola-zero': 'coca-cola-zero.png',
+  ilohas: 'ilohas.webp',
+  aquarius: 'aquarius.webp',
+  'yakan-no-mugicha': 'yakan-no-mugicha.webp',
+  sprite: 'sprite.png',
+  ayataka: 'ayataka.jpg',
+  georgia: 'georgia.webp',
+  'soken-bicha': 'soken-bicha.jpg',
+  toreta: 'toreta.webp',
+};
+
 /**
  * RESULT: 生成画像が装飾なしで中央フェードイン。左下テキスト / 右上ロゴ /
  * 右下縦書きブランド名が段階フレームイン。滞留後に段階フレームアウトして
@@ -31,7 +45,19 @@ export class ResultSequence extends Sequence {
 
     els.image.src = result.imageUrl;
     els.brandBR.textContent = JP_NAMES[brand.slug] ?? brand.label;
-    els.logoTR.textContent = brand.label; // ロゴ画像が支給されたら <img> に差し替え
+
+    // 右上ロゴ：画像があれば <img>、無ければラベル文字をフォールバック表示
+    const logoFile = LOGO_FILES[brand.slug];
+    if (logoFile) {
+      els.logoImg.src = `/logos/${logoFile}`;
+      els.logoImg.alt = brand.label;
+      els.logoImg.hidden = false;
+      els.logoTR.textContent = '';
+      els.logoTR.appendChild(els.logoImg);
+    } else {
+      els.logoImg.hidden = true;
+      els.logoTR.textContent = brand.label;
+    }
 
     // 初期状態リセット
     gsap.set(els.image, { opacity: 0, y: 0 });

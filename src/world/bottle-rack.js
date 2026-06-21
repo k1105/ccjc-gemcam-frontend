@@ -61,13 +61,9 @@ export class BottleRack {
   /** main.js から world.addTickable で常駐登録される */
   tick = (dt, elapsed) => {
     if (!this.group.visible || !this.swayEnabled) return;
-    const cfg = this.choreo.data.select.rack;
-    let i = 0;
+    // 上下の浮遊モーションは廃止。各ボトルは静止させる
     for (const { spin } of this.bottles.values()) {
-      const phase = i * 0.7;
-      // 画像板なので Y回転（くるくる）はせず、上下の浮遊だけ残す
-      spin.position.y = Math.sin(elapsed * cfg.idleSwaySpeed * 1.3 + phase) * cfg.idleSwayAmp;
-      i++;
+      spin.position.y = 0;
     }
   };
 

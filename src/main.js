@@ -10,6 +10,7 @@ import { Webcam } from './core/webcam.js';
 import { ApiService } from './api.js';
 import { Overlay } from './ui/overlay.js';
 import { createEnvironment } from './world/environment.js';
+import { setGlassConfig } from './world/bottle-factory.js';
 import { BottleRack } from './world/bottle-rack.js';
 import { SelectSequence } from './sequences/select.js';
 import { ShootSequence } from './sequences/shoot.js';
@@ -26,7 +27,9 @@ async function boot() {
   const director = new CameraDirector(world.camera, world);
   const api = import.meta.env.VITE_MOCK === '1' ? new MockApiService() : new ApiService();
 
-  const environment = createEnvironment(world.scene);
+  // ガラスマテリアルの見え方はボトル生成より前に確定させる（ロード時に適用されるため）
+  setGlassConfig(choreo.data.scene.glass);
+  const environment = createEnvironment(world.scene, choreo.data.scene.fog);
 
   const bottleRack = new BottleRack(brands, choreo);
   await bottleRack.init(world.scene);

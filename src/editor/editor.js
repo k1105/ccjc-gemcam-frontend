@@ -2,6 +2,7 @@ import { GUI } from 'lil-gui';
 import { PathEditor } from './path-editor.js';
 import { Timeline } from './timeline.js';
 import { exportChoreo, importChoreo } from './io.js';
+import { setGlassConfig, refreshGlassMaterials } from '../world/bottle-factory.js';
 
 /**
  * デバッグエディタ（Dキーでトグル）。choreography の全数値を lil-gui で編集し、
@@ -92,13 +93,53 @@ export class Editor {
       },
     });
 
-    // --- タブ化（同時に操作しないものを4タブへ。Config IO/Timeline は常時表示） ---
+    // --- 環境（fog / ガラス）: choreo.data.scene をライブ編集 ---
+    const envFolder = this.gui.addFolder('environment');
+    this._buildEnvFolder(envFolder);
+
+    // --- タブ化（同時に操作しないものをタブへ。Config IO/Timeline は常時表示） ---
     this._setupTabs({
       Camera: this.pathEditor.gui,
       Lights: this.pathEditor.lightsGui,
       Particles: particlesFolder,
       Scene: tune,
+      Env: envFolder,
     });
+  }
+
+  /**
+   * 環境フォルダ（fog / ガラス）を組み立てる。choreo.data.scene を直接バインドし、
+   * 変更時にライブ反映（fog→scene.fog / glass→ロード済みボトル）＋ undo 履歴へ記録する。
+   */
+  _buildEnvFolder(folder) {
+    const { choreo, world, environment } = this.ctx;
+    const scene = choreo.data.scene;
+    const touch = () => this._touch();
+
+    const applyFog = () => {
+      environment.applyFog(scene.fog);
+      touch();
+    };
+    const fog = folder.addFolder('fog');
+    fog.add(scene.fog, 'enabled').name('有効').onChange(applyFog);
+    fog.add(scene.fog, 'near', 0, 20, 0.1).name('near（手前の素通し境界）').onChange(applyFog);
+    fog.add(scene.fog, 'far', 1, 60, 0.5).name('far（背景に溶ける距離）').onChange(applyFog);
+
+    const applyGlass = () => {
+      setGlassConfig(scene.glass);
+      refreshGlassMaterials(world.scene);
+      touch();
+    };
+    const glass = folder.addFolder('glass（透明部分）');
+    glass.addColor(scene.glass, 'tint').name('色味（白=クリア）').onChange(applyGlass);
+    glass.add(scene.glass, 'transmission', 0, 1, 0.01).name('透過').onChange(applyGlass);
+    glass.add(scene.glass, 'roughness', 0, 1, 0.01).name('粗さ').onChange(applyGlass);
+    glass.add(scene.glass, 'ior', 1, 2.333, 0.01).name('IOR（屈折率）').onChange(applyGlass);
+    glass.add(scene.glass, 'thickness', 0, 2, 0.01).name('厚み（屈折の強さ）').onChange(applyGlass);
+    glass
+      .add(scene.glass, 'envMapIntensity', 0, 4, 0.05)
+      .name('映り込み強度')
+      .onChange(applyGlass);
   }
 
   /**
@@ -246,6 +287,13 @@ export class Editor {
     this.gui.controllersRecursive().forEach((c) => c.updateDisplay());
     this.pathEditor.rebuild();
     if (this.ctx.manager.is('select')) this.ctx.bottleRack.applyLayout?.();
+    // 環境（fog/ガラス）もスナップショットへ追従させる（updateDisplay だけでは scene に反映されない）
+    const sc = this.ctx.choreo.data.scene;
+    if (sc) {
+      this.ctx.environment.applyFog?.(sc.fog);
+      setGlassConfig(sc.glass);
+      refreshGlassMaterials(this.ctx.world.scene);
+    }
     this.timeline.invalidate();
     this.ctx.choreo.save(); // undo/redo 後の状態も保存
   }

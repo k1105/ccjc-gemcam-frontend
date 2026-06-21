@@ -1,44 +1,71 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 /**
  * ブランドごとのボトル3Dモデルを /models/{slug}.glb からロードする。
  * slug は config/brands.json と public/models/ のファイル名で一致させる規約。
  *
- * 例外的に FBX を使うブランドは FBX_MODELS に slug → ファイル名 を登録する。
- *
  * 返り値: THREE.Group（原点=ボトル底中心、高さ ~0.8 ワールド単位）
  */
 
-// GLB ではなく FBX を使うブランド（生成中の表示モデル差し替え用）
-const FBX_MODELS = {
-  ilohas: 'ilohas.fbx',
-};
+// Draco 圧縮された GLB（例: ilohas.glb）を展開するためのデコーダ。
+// デコーダ本体は public/draco/ に置き、Vite がルート配信する。
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('/draco/');
 
 const gltfLoader = new GLTFLoader();
-const fbxLoader = new FBXLoader();
+gltfLoader.setDRACOLoader(dracoLoader);
+
+// ガラス（transmission）マテリアルの見え方を一元管理する設定。
+// GLB の baseColor は 0.8 グレー固定で出てくる（プリンシプルBSDF 既定）ため、
+// 透明部分がグレーに濁る。ここでロード時に白基調のクリアガラスへ正規化する。
+// choreo.data.scene.glass の値を main 起動時に setGlassConfig() で流し込む。
+const glassConfig = {
+  tint: '#ffffff',
+  roughness: 0.05,
+  ior: 1.5,
+  transmission: 1.0,
+  thickness: 0.3,
+  envMapIntensity: 1.5,
+};
+
+export function setGlassConfig(cfg) {
+  if (cfg) Object.assign(glassConfig, cfg);
+}
+
+// transmission を持つ（=ガラスとして出力された）物理マテリアルか
+function isGlassMaterial(mat) {
+  return mat && mat.isMeshPhysicalMaterial && mat.transmission > 0;
+}
+
+// 1マテリアルへ現在の glassConfig を適用する
+function applyGlassConfig(mat) {
+  mat.color.set(glassConfig.tint);
+  mat.transmission = glassConfig.transmission;
+  mat.roughness = glassConfig.roughness;
+  mat.metalness = 0;
+  mat.ior = glassConfig.ior;
+  mat.thickness = glassConfig.thickness;
+  mat.envMapIntensity = glassConfig.envMapIntensity;
+  // 透過は深度書き込みすると背後が抜けないことがあるため、薄ガラス前提で素直に透過させる
+  mat.transparent = true;
+  mat.needsUpdate = true;
+}
+
+/**
+ * シーン/グループ配下の全ガラスマテリアルへ glassConfig を再適用する。
+ * エディタからのライブ調整で使う（既にロード済みのボトルへ反映）。
+ */
+export function refreshGlassMaterials(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) if (isGlassMaterial(m)) applyGlassConfig(m);
+  });
+}
 
 export async function createBottle(brand) {
-  const fbxName = FBX_MODELS[brand.slug];
-  if (fbxName) {
-    const fbxUrl = `/models/${fbxName}`;
-    try {
-      // FBXLoader.loadAsync は Group を直接返す（GLTF と違い .scene は無い）
-      const model = await fbxLoader.loadAsync(fbxUrl);
-      model.traverse((o) => {
-        if (o.isMesh) {
-          o.castShadow = true;
-          o.receiveShadow = false;
-        }
-      });
-      return normalizeGlbModel(model);
-    } catch (err) {
-      console.error(`[bottle-factory] FBXロード失敗: ${fbxUrl}`, err);
-      return new THREE.Group();
-    }
-  }
-
   const glbUrl = `/models/${brand.slug}.glb`;
   try {
     const gltf = await gltfLoader.loadAsync(glbUrl);
@@ -47,6 +74,8 @@ export async function createBottle(brand) {
       if (o.isMesh) {
         o.castShadow = true;
         o.receiveShadow = false;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) if (isGlassMaterial(m)) applyGlassConfig(m);
       }
     });
     return normalizeGlbModel(model);

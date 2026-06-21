@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 /**
  * 常駐3Dワールド。renderer / scene / camera / rAF ループを一元管理する。
@@ -27,6 +28,12 @@ export class World {
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.container.appendChild(this.renderer.domElement);
+
+    // ガラス（transmission）マテリアルに映り込み・ハイライトを与えるための環境マップ（IBL）。
+    // RoomEnvironment は外部 HDRI 不要の合成スタジオ環境。背景には使わず scene.environment にのみ適用し、
+    // 単色背景（environment.js の #f5f5f7）の見た目は維持する。
+    this._pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = this._pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
     this.clock = new THREE.Clock();
     this.tickables = new Set();
@@ -84,6 +91,8 @@ export class World {
     this.running = false;
     if (this._rafId !== null) cancelAnimationFrame(this._rafId);
     window.removeEventListener('resize', this._onResize);
+    this.scene.environment?.dispose();
+    this._pmrem?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

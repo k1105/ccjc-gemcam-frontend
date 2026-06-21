@@ -14,6 +14,18 @@ export class Choreo {
     // ディープコピーして元のモジュールキャッシュを汚さない
     this.data = structuredClone(choreographyJson);
     this._restoreFromStorage();
+    // version を上げずに後から増えたトップレベルセクション（scene 等）を補完する。
+    // 既存の localStorage 保存（旧スキーマ）を捨てずに新キーだけ埋める。
+    this._fillMissingDefaults();
+  }
+
+  /** bundled 初期値にあって data に無いトップレベルキーを浅く補完する */
+  _fillMissingDefaults() {
+    for (const key of Object.keys(choreographyJson)) {
+      if (this.data[key] === undefined) {
+        this.data[key] = structuredClone(choreographyJson[key]);
+      }
+    }
   }
 
   /** localStorage に編集途中の状態があれば復元（version 一致時のみ） */

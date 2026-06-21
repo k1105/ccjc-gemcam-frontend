@@ -119,7 +119,10 @@ export class PhotoParticles {
 
     const s = this._stream;
     this.material = new THREE.ShaderMaterial({
-      uniforms: {
+      // fog:true の ShaderMaterial は fog 用 uniform(fogColor/fogNear/fogFar)を自前で持つ必要がある。
+      // 無いと renderer.refreshFogUniforms が undefined.value で毎フレーム例外を投げる。
+      // UniformsLib.fog をクローンして混ぜる（グローバル共有 uniform の汚染を防ぐためクローン）。
+      uniforms: Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
         uTime: { value: 0 },
         uUseImageColor: { value: this.cfg.useImageColor === false ? 0 : 1 },
         uBrightMin: { value: this.cfg.brightMin ?? 0.35 },
@@ -160,11 +163,12 @@ export class PhotoParticles {
         uSurviveRatio: { value: this.cfg.surviveRatio },
         uSizeWorld: { value: this.cfg.size },
         uProjScale: { value: 1000 },
-      },
+      }),
       vertexShader: VERT,
       fragmentShader: FRAG,
       transparent: true,
       depthWrite: false,
+      fog: true, // scene.fog を粒にも反映（fog uniform は上で UniformsLib.fog を混入済み）
     });
 
     this.points = new THREE.Points(this.geometry, this.material);
@@ -425,6 +429,8 @@ uniform float uProjScale;
 varying vec3 vColor;
 varying float vAlpha;
 
+#include <fog_pars_vertex>
+
 const float TAU = 6.28318530718;
 
 // ボトル周囲の共通螺旋（全パーティクルが時間差で同一パスを辿る＝彗星構造を維持）。
@@ -524,6 +530,7 @@ void main() {
 
   vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
   gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>  // vFogDepth = -mvPosition.z（fog反映用の視点距離）
   // 写真状態では均一サイズ。生き残った粒のうち少数だけが大きな球へ成長
   // （pow で偏らせ、大小の混ざった疎な球の群れにする）
   float flightT = clamp(t / uFlightDur, 0.0, 1.0);
@@ -539,6 +546,8 @@ uniform float uUseTexture;
 
 varying vec3 vColor;
 varying float vAlpha;
+
+#include <fog_pars_fragment>
 
 void main() {
   float mask;
@@ -557,5 +566,6 @@ void main() {
   }
   gl_FragColor = vec4(vColor, vAlpha * mask);
   if (gl_FragColor.a < 0.01) discard;
+  #include <fog_fragment>  // 遠景の粒を scene.fog の色へ補間（rgbのみ・alphaは保持）
 }
 `;

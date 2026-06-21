@@ -519,7 +519,9 @@ export class LoopEvaluator {
     const minP = phase.minHoldProgress ?? 0;
     const n = phase.exitPoints ?? 4;
     const base = Math.max(this.progress, minP);
-    this.releaseTarget = Math.ceil(base * n + 1e-6) / n;
+    // 脱出先は base 以上の最寄り exitPoint。ちょうど点上（exitPoints=1 で 1 周完了＝
+    // 整数境界に到達した時など）は余分な 1 周を足さず、その点で抜ける。
+    this.releaseTarget = Math.ceil(base * n - 1e-6) / n;
     this.releasing = true;
   }
 

@@ -74,7 +74,7 @@
         "relativeTo": "bottle",
         "closed": true,
         "loopDuration": 6.0,
-        "exitPoints": 12,
+        "exitPoints": 1,
         "minHoldProgress": 0.0,
         "lookAt": { "mode": "target", "target": "heroParticle", "lerp": 0.2 },
         "path": [
@@ -127,6 +127,11 @@
       "transmission": 1.0,
       "thickness": 0.3,
       "envMapIntensity": 1.5
+    },
+    "postfx": {
+      "enabled": true,
+      "dof": { "enabled": true, "focusDistance": 3.0, "focusRange": 4.0, "bokehScale": 2.0, "resolutionScale": 0.5 },
+      "afterimage": { "enabled": false, "damp": 0.85 }
     }
   }
 }

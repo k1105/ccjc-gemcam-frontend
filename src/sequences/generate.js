@@ -74,6 +74,9 @@ export class GenerateSequence extends Sequence {
     const bottlePos = new THREE.Vector3(...gcfg.bottlePos);
     const bottleCenter = bottlePos.clone().add(new THREE.Vector3(0, 0.4 * BOTTLE_SCALE, 0));
     this.bottleCenter = bottleCenter;
+    // 被写界深度のピントを主役ボトルへ。退場時に固定距離へ戻す（postfx 無効時は no-op）
+    world.setFocusTarget(bottleCenter);
+    this.bag.add(() => world.setFocusTarget(null));
     createBottle(brand).then((model) => {
       if (this.bag.disposed) return;
       model.position.copy(bottlePos);

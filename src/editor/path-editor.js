@@ -406,7 +406,26 @@ export class PathEditor {
     // ③ look / aim（注視点オーバーライド）
     const hasLook = this._hasLook(entry);
     const lookF = this.kfFolder.addFolder('③ look / aim（向き）');
-    lookF.add({ on: hasLook }, 'on').name('注視点を上書き').onChange((on) => this._setLookOverride(on));
+
+    // ショット全体の注視対象（キーフレーム上書きが無いアンカーはこれを向く）
+    const shotMode = Array.isArray(phase.lookAt?.keys) ? null : phase.lookAt?.target ?? 'fixed';
+    if (shotMode !== null) {
+      lookF
+        .add({ mode: shotMode }, 'mode', ['heroParticle', 'bottle', 'fixed'])
+        .name('注視対象（ショット）')
+        .onChange((m) => this._setPathLookTarget(m));
+      if (shotMode !== 'fixed') {
+        lookF
+          .add({ lerp: phase.lookAt?.lerp ?? 0.085 }, 'lerp', 0.01, 1, 0.005)
+          .name('追従 lerp（1=即時）')
+          .onChange((v) => {
+            phase.lookAt.lerp = Number(v.toFixed(3));
+            this.onChanged?.();
+          });
+      }
+    }
+
+    lookF.add({ on: hasLook }, 'on').name('注視点を上書き（このアンカー）').onChange((on) => this._setLookOverride(on));
     if (hasLook) {
       const lk = entry.look;
       const pr = { x: lk[0], y: lk[1], z: lk[2] };
@@ -1270,7 +1289,7 @@ export class PathEditor {
       ease: 'power2.inOut',
       path: [[0, 1, 3], [1, 1.2, 2.5]],
       times: [0, 1],
-      lookAt: { mode: 'fixed', point: [0, 0.5, 0] },
+      lookAt: { mode: 'target', target: 'heroParticle', lerp: 0.085 },
       fov: 45,
     };
     shots.splice(at, 0, shot);
@@ -1630,6 +1649,21 @@ export class PathEditor {
     this._rebuildHandles();
     this._rebuildLine();
     this._attachGizmo();
+    this._buildKfPanel();
+    this.onChanged?.();
+  }
+
+  /** ショット全体の注視対象を切替（heroParticle / bottle / fixed） */
+  _setPathLookTarget(m) {
+    const phase = this._currentPhase();
+    if (!phase) return;
+    if (m === 'fixed') {
+      const base = Array.isArray(phase.lookAt?.point) ? phase.lookAt.point : [0, 0.5, 0];
+      phase.lookAt = { mode: 'fixed', point: [...base] };
+    } else {
+      phase.lookAt = { mode: 'target', target: m, lerp: phase.lookAt?.lerp ?? 0.085 };
+    }
+    this._rebuildAim();
     this._buildKfPanel();
     this.onChanged?.();
   }

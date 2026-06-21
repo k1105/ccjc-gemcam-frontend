@@ -14,6 +14,11 @@
     "particles": {
       "grid": [200, 112],
       "size": 0.018,
+      "useImageColor": true,
+      "brightMin": 0.35,
+      "brightMax": 1.0,
+      "brightRandom": 0.25,
+      "grainImage": "",
       "sizeGrow": 6.0,
       "surviveRatio": 0.04,
       "rippleLead": 1.4,

@@ -1,7 +1,7 @@
 import { GUI } from 'lil-gui';
 import { PathEditor } from './path-editor.js';
 import { Timeline } from './timeline.js';
-import { exportChoreo, importChoreo } from './io.js';
+import { exportChoreo, importChoreo, importGrainImage } from './io.js';
 import { setGlassConfig, refreshGlassMaterials } from '../world/bottle-factory.js';
 
 /**
@@ -85,13 +85,26 @@ export class Editor {
     // particles は専用タブ（独立トップレベル）。シェーダ uniform に焼かれるため
     // scene:true でプレビューの粒を再構築する
     const particlesFolder = this.gui.addFolder('particles');
+    const onParticlesChange = () => {
+      this.timeline.invalidate({ scene: true });
+      touch();
+    };
     buildGuiFromObject(particlesFolder, choreo.data.generate.particles, {
       labels: PARTICLE_LABELS,
-      onChange: () => {
-        this.timeline.invalidate({ scene: true });
-        touch();
-      },
+      skipKeys: ['grainImage'], // 画像はテキスト欄でなく専用のアップロードボタンで扱う
+      onChange: onParticlesChange,
     });
+    // 粒のベース画像（data URL）のアップロード / クリア（空=手続き的な丸スプライト）
+    const pcfg = choreo.data.generate.particles;
+    particlesFolder
+      .add(
+        { upload: () => importGrainImage((dataURL) => { pcfg.grainImage = dataURL; onParticlesChange(); }) },
+        'upload'
+      )
+      .name('粒画像をアップロード');
+    particlesFolder
+      .add({ clear: () => { pcfg.grainImage = ''; onParticlesChange(); } }, 'clear')
+      .name('粒画像をクリア（丸に戻す）');
 
     // --- 環境（fog / ガラス）: choreo.data.scene をライブ編集 ---
     const envFolder = this.gui.addFolder('environment');
@@ -411,6 +424,10 @@ function buildGuiFromObject(folder, obj, { skipKeys = [], onChange, labels = {} 
 const PARTICLE_LABELS = {
   grid: 'グリッド数 [幅, 高さ]',
   size: '粒サイズ',
+  useImageColor: '写真の色を反映',
+  brightMin: '明度レンジ・最小',
+  brightMax: '明度レンジ・最大',
+  brightRandom: '明度ランダム度',
   sizeGrow: '成長量',
   surviveRatio: '生存率',
   rippleLead: '波・開始遅延',

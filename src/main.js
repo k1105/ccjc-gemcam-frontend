@@ -19,7 +19,7 @@ import { ResultSequence } from './sequences/result.js';
 
 async function boot() {
   const world = new World('canvas-container');
-  const choreo = new Choreo();
+  const choreo = await Choreo.load();
   const brands = new Brands();
   const overlay = new Overlay();
   const keyboard = new Keyboard();

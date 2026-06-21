@@ -113,10 +113,20 @@ export class PhotoParticles {
     this.geometry.setAttribute('aIsHero', new THREE.BufferAttribute(isHero, 1));
     this.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
 
+    // 粒の見た目: 写真の色を反映するか / しない場合は明度レンジ＋ランダムで単色化。
+    // grainImage（data URL）があれば手続き的な丸の代わりにその画像で粒を描画する。
+    const grainTex = grainTexture(this.cfg.grainImage);
+
     const s = this._stream;
     this.material = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
+        uUseImageColor: { value: this.cfg.useImageColor === false ? 0 : 1 },
+        uBrightMin: { value: this.cfg.brightMin ?? 0.35 },
+        uBrightMax: { value: this.cfg.brightMax ?? 1.0 },
+        uBrightRandom: { value: this.cfg.brightRandom ?? 0.25 },
+        uUseTexture: { value: grainTex ? 1 : 0 },
+        uTexture: { value: grainTex ?? fallbackTexture() },
         uTarget: { value: this._target },
         uPlaneCenter: { value: this._planeCenter },
         uPlaneSize: { value: this._planeSize },
@@ -332,6 +342,30 @@ function cubicBezier(p0, p1, p2, p3, t, out) {
   return out;
 }
 
+// 粒テクスチャは data URL をキーに使い回す。粒の再構築（スライダー変更）ごとに
+// 画像を読み直さないためのモジュールキャッシュ。共有なので個別 dispose しない。
+const _grainCache = new Map();
+function grainTexture(dataURL) {
+  if (!dataURL) return null;
+  let tex = _grainCache.get(dataURL);
+  if (!tex) {
+    tex = new THREE.TextureLoader().load(dataURL);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    _grainCache.set(dataURL, tex);
+  }
+  return tex;
+}
+
+// uTexture サンプラに必ず有効なテクスチャを束ねるための 1x1 白（uUseTexture=0 時に使用）
+let _fallbackTex = null;
+function fallbackTexture() {
+  if (!_fallbackTex) {
+    _fallbackTex = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    _fallbackTex.needsUpdate = true;
+  }
+  return _fallbackTex;
+}
+
 /** 決定論的PRNG（シードはエディタ調整に対して安定） */
 function mulberry32(a) {
   return function () {
@@ -350,6 +384,10 @@ attribute vec4 aSeed;
 attribute float aIsHero;
 
 uniform float uTime;
+uniform float uUseImageColor;
+uniform float uBrightMin;
+uniform float uBrightMax;
+uniform float uBrightRandom;
 uniform vec3 uTarget;
 uniform vec3 uPlaneCenter;
 uniform vec2 uPlaneSize;
@@ -410,7 +448,14 @@ vec3 streamBezier(float t) {
 }
 
 void main() {
-  vColor = aColor;
+  // 写真の色を反映するか、しないなら写真の明度を [min,max] へ再マップ＋粒ごとランダム
+  if (uUseImageColor > 0.5) {
+    vColor = aColor;
+  } else {
+    float lum = dot(aColor, vec3(0.299, 0.587, 0.114));
+    float n = clamp(lum + (aSeed.x - 0.5) * uBrightRandom, 0.0, 1.0);
+    vColor = vec3(mix(uBrightMin, uBrightMax, n));
+  }
 
   vec3 start = vec3(
     uPlaneCenter.x + (aGridUV.x - 0.5) * uPlaneSize.x,
@@ -489,16 +534,28 @@ void main() {
 `;
 
 const FRAG = /* glsl */ `
+uniform sampler2D uTexture;
+uniform float uUseTexture;
+
 varying vec3 vColor;
 varying float vAlpha;
 
 void main() {
-  // 円形スプライト（ソフトエッジ）
-  vec2 c = gl_PointCoord - 0.5;
-  float d = length(c);
-  if (d > 0.5) discard;
-  float edge = 1.0 - smoothstep(0.35, 0.5, d);
-  gl_FragColor = vec4(vColor, vAlpha * edge);
+  float mask;
+  if (uUseTexture > 0.5) {
+    // アップロードした粒画像で形を決める。色は vColor を使うので画像は形マスク扱い。
+    // 透過PNG（アルファ）も白地JPG（輝度）も拾えるよう alpha×最大チャンネルでマスク化。
+    // gl_PointCoord は上が0なので y を反転して画像を正立で貼る。
+    vec4 t = texture2D(uTexture, vec2(gl_PointCoord.x, 1.0 - gl_PointCoord.y));
+    mask = t.a * max(t.r, max(t.g, t.b));
+  } else {
+    // 円形スプライト（ソフトエッジ）
+    vec2 c = gl_PointCoord - 0.5;
+    float d = length(c);
+    if (d > 0.5) discard;
+    mask = 1.0 - smoothstep(0.35, 0.5, d);
+  }
+  gl_FragColor = vec4(vColor, vAlpha * mask);
   if (gl_FragColor.a < 0.01) discard;
 }
 `;

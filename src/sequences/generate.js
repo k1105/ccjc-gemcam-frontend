@@ -3,7 +3,7 @@ import { Sequence } from '../core/sequence-manager.js';
 import { isOverlay } from '../core/camera-eval.js';
 import { OverlayScheduler } from '../core/overlay-scheduler.js';
 import { TimerBag, disposeObject3D } from '../core/resources.js';
-import { PhotoParticles } from '../world/photo-particles.js';
+import { PhotoParticles, makeDissolveMaterial } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
 import { LightRig } from '../core/light-rig.js';
 
@@ -68,6 +68,9 @@ export class GenerateSequence extends Sequence {
     );
     this.plane.position.copy(planeCenter);
     world.scene.add(this.plane);
+    // 写真→粒のディゾルブに使う値（_swapToParticles で平面シェーダへ渡す）。
+    // パーティクルの出発順と同じ等方ノイズ場にするため縦横比を補正する。
+    this._planeAspect = planeW / planeH;
 
     // --- ターゲットボトル（遠方に配置、生成完了の主役） ---
     const BOTTLE_SCALE = gcfg.bottleScale ?? 1.6; // 遠景の主役なので少し大きく
@@ -181,16 +184,45 @@ export class GenerateSequence extends Sequence {
   }
 
   _swapToParticles() {
-    const { world } = this.ctx;
+    const { world, choreo } = this.ctx;
+    const pcfg = choreo.data.generate.particles;
     world.scene.add(this.particles.points);
     this.particles.start();
     this.bag.add(() => this.particles.stopTicking());
-    if (this.plane) {
-      world.scene.remove(this.plane);
-      this.plane.geometry.dispose();
-      this.plane.material.dispose();
-      this.plane = null;
-    }
+
+    if (!this.plane) return;
+
+    // ハードカットせず、写真平面を simplex noise マップで有機的にディゾルブさせる。
+    // パーティクルと同一のノイズ場・進行クロック（particles.time）を共有するので、
+    // 「写真が粒へ溶けるパッチ」と「その粒が飛び出すパッチ」が連動して見える。
+    // ディゾルブは波（ripple）の時間内に完了させ、以降は粒のみになる。
+    const lead = pcfg.rippleLead;
+    const dissolveMat = makeDissolveMaterial(this.planeTexture, {
+      aspect: this._planeAspect,
+      noiseScale: pcfg.dissolveNoiseScale ?? 6.0,
+      lead,
+      edge: pcfg.dissolveEdge ?? 0.3,
+    });
+    this.plane.material.dispose();
+    this.plane.material = dissolveMat;
+    this.plane.renderOrder = 1; // 半透明の写真を粒（renderOrder=0）より手前へ重ねる
+
+    const dissolveTick = () => {
+      const shader = dissolveMat.userData.shader;
+      if (shader) shader.uniforms.uDTime.value = this.particles.time;
+      // 完全に溶けきったら平面を破棄（少しのマージンを足して取りこぼしを防ぐ）
+      if (this.particles.time >= lead * 1.08) {
+        world.removeTickable(dissolveTick);
+        if (this.plane) {
+          world.scene.remove(this.plane);
+          this.plane.geometry.dispose();
+          this.plane.material.dispose();
+          this.plane = null;
+        }
+      }
+    };
+    world.addTickable(dissolveTick);
+    this.bag.add(() => world.removeTickable(dissolveTick));
   }
 
   async _fail() {

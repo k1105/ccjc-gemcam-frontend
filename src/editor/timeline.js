@@ -91,6 +91,8 @@ export class Timeline {
 
     const brand = brands.getBySlug(this.brandSelect.value) ?? brands.list[0];
     await this.stage.open(brand);
+    // ステージ読み込み中に close() された場合はゾンビ化（パネル再表示）しないよう撤退
+    if (!this.open_) return;
     this._bake();
 
     this.frame = 0;

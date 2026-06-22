@@ -128,6 +128,13 @@ export class PhotoParticles {
         uBrightMin: { value: this.cfg.brightMin ?? 0.35 },
         uBrightMax: { value: this.cfg.brightMax ?? 1.0 },
         uBrightRandom: { value: this.cfg.brightRandom ?? 0.25 },
+        // 切り替え直後は画像色 → 時間で最終状態（useImageColor=false なら単色）へ遷移
+        uColorFadeStart: { value: this.cfg.colorFadeStart ?? 1.4 },
+        uColorFadeEnd: { value: this.cfg.colorFadeEnd ?? 3.5 },
+        // 切り替え直後の粒サイズを画面ピクセル（半径）で直接指定し、uSwapSizeBoostDur 秒
+        // かけて通常（システム指定）サイズへ収束させる。見た目で合わせられるよう px 固定。
+        uSwapPixelRadius: { value: this.cfg.swapPixelRadius ?? 15 },
+        uSwapSizeBoostDur: { value: this.cfg.swapSizeBoostDur ?? 1.5 },
         uUseTexture: { value: grainTex ? 1 : 0 },
         uTexture: { value: grainTex ?? fallbackTexture() },
         uTarget: { value: this._target },
@@ -381,6 +388,106 @@ function mulberry32(a) {
   };
 }
 
+// 2D simplex noise（Ashima / Stefan Gustavson, webgl-noise）。出力は概ね [-1, 1]。
+// パーティクルの出発順（VERT）と、写真平面→粒のディゾルブ（generate.js の平面シェーダ）で
+// 同一のノイズ場を共有し、写真の溶け方と粒の飛び出し方が同じパッチで連動するようにする。
+export const SNOISE2D_GLSL = /* glsl */ `
+vec3 snoise_mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec2 snoise_mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec3 snoise_permute(vec3 x) { return snoise_mod289(((x * 34.0) + 1.0) * x); }
+float snoise(vec2 v) {
+  const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                     -0.577350269189626, 0.024390243902439);
+  vec2 i  = floor(v + dot(v, C.yy));
+  vec2 x0 = v - i + dot(i, C.xx);
+  vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+  vec4 x12 = x0.xyxy + C.xxzz;
+  x12.xy -= i1;
+  i = snoise_mod289(i);
+  vec3 p = snoise_permute(snoise_permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+  vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+  m = m * m;
+  m = m * m;
+  vec3 x = 2.0 * fract(p * C.www) - 1.0;
+  vec3 h = abs(x) - 0.5;
+  vec3 ox = floor(x + 0.5);
+  vec3 a0 = x - ox;
+  m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+  vec3 g;
+  g.x  = a0.x  * x0.x  + h.x  * x0.y;
+  g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+  return 130.0 * dot(m, g);
+}
+`;
+
+/**
+ * 写真平面を simplex noise マスクで「欠けさせて」消すためのマテリアル。
+ * 通常の MeshBasicMaterial（不透明・色管理は three 任せ）に onBeforeCompile でノイズの
+ * 切り抜きを注入する。uDTime/uDLead で 0→1 に進む「前線」より小さいノイズ値の領域から
+ * 順に discard していく＝写真が有機的なパッチ状に穴あきで消えていく。
+ *
+ * 平面は半透明（depthWrite=false）で、裏に居る粒の上にアルファ合成される。前線付近を
+ * 幅 uDEdge でなめらかに不透明→透明へグラデーションさせるので、写真が粒の点描へ
+ * 溶けていくように見える（硬い輪郭やディザのジラつき、明るい縁が出ない）。
+ * 粒より必ず手前に重ねるため、呼び出し側は plane.renderOrder を粒より大きくすること。
+ *
+ * 本番（sequences/generate.js）とエディタのスクラブ（editor/preview-stage.js）で共有する。
+ * 呼び出し側が毎フレーム material.userData.shader.uniforms.uDTime を進める。
+ *
+ * @param {THREE.Texture} map 表示テクスチャ（写真）
+ * @param {{aspect:number, noiseScale:number, lead:number, edge?:number}} opts
+ */
+export function makeDissolveMaterial(map, { aspect, noiseScale, lead, edge = 0.3 }) {
+  const mat = new THREE.MeshBasicMaterial({
+    map,
+    toneMapped: false,
+    transparent: true,
+    depthWrite: false,
+  });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uDTime = { value: 0 };
+    shader.uniforms.uDLead = { value: lead };
+    shader.uniforms.uDAspect = { value: aspect };
+    shader.uniforms.uDNoiseScale = { value: noiseScale };
+    shader.uniforms.uDEdge = { value: edge };
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vDUv;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n  vDUv = uv;');
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uDTime;
+        uniform float uDLead;
+        uniform float uDAspect;
+        uniform float uDNoiseScale;
+        uniform float uDEdge;
+        varying vec2 vDUv;
+        ${SNOISE2D_GLSL}`
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+        {
+          // 縦横比補正済みノイズ場。前線 front 未満のノイズ値の領域を消していく。
+          float nz = snoise(vec2(vDUv.x * uDAspect, vDUv.y) * uDNoiseScale) * 0.5 + 0.5;
+          // 前線は 0 → 1+uDEdge まで進める。これで uDTime=0 は全面表示（欠けなし）、
+          // uDTime=uDLead で完全消滅になる。ぼかし帯(幅 uDEdge)は前線の「消える側」に置く。
+          float front = clamp(uDTime / max(uDLead, 1e-3), 0.0, 1.0) * (1.0 + uDEdge);
+          // nz>=front は不透明、front-uDEdge 以下は透明、その間をなめらかにグラデーション。
+          float alpha = smoothstep(front - uDEdge, front, nz);
+          gl_FragColor.a *= alpha;
+          if (gl_FragColor.a < 0.003) discard;
+        }`
+      );
+
+    mat.userData.shader = shader;
+  };
+  return mat;
+}
+
 const VERT = /* glsl */ `
 attribute vec2 aGridUV;
 attribute vec3 aColor;
@@ -392,6 +499,10 @@ uniform float uUseImageColor;
 uniform float uBrightMin;
 uniform float uBrightMax;
 uniform float uBrightRandom;
+uniform float uColorFadeStart;
+uniform float uColorFadeEnd;
+uniform float uSwapPixelRadius;
+uniform float uSwapSizeBoostDur;
 uniform vec3 uTarget;
 uniform vec3 uPlaneCenter;
 uniform vec2 uPlaneSize;
@@ -454,14 +565,17 @@ vec3 streamBezier(float t) {
 }
 
 void main() {
-  // 写真の色を反映するか、しないなら写真の明度を [min,max] へ再マップ＋粒ごとランダム
-  if (uUseImageColor > 0.5) {
-    vColor = aColor;
-  } else {
-    float lum = dot(aColor, vec3(0.299, 0.587, 0.114));
-    float n = clamp(lum + (aSeed.x - 0.5) * uBrightRandom, 0.0, 1.0);
-    vColor = vec3(mix(uBrightMin, uBrightMax, n));
-  }
+  // 切り替え直後は必ず画像色から始まる。最終状態は useImageColor で決まり、
+  // 色を落とす場合（useImageColor=false）は [colorFadeStart, colorFadeEnd] 秒で
+  // 画像色 → 単色（明度を [min,max] へ再マップ＋粒ごとランダム）へ滑らかに遷移する。
+  // useImageColor=true なら最終状態も画像色なので、結果的に終始色付きのまま。
+  vec3 colored = aColor;
+  float lum = dot(aColor, vec3(0.299, 0.587, 0.114));
+  float n = clamp(lum + (aSeed.x - 0.5) * uBrightRandom, 0.0, 1.0);
+  vec3 mono = vec3(mix(uBrightMin, uBrightMax, n));
+  vec3 finalCol = (uUseImageColor > 0.5) ? colored : mono;
+  float colorFade = smoothstep(uColorFadeStart, uColorFadeEnd, uTime);
+  vColor = mix(colored, finalCol, colorFade);
 
   vec3 start = vec3(
     uPlaneCenter.x + (aGridUV.x - 0.5) * uPlaneSize.x,
@@ -535,8 +649,18 @@ void main() {
   // （pow で偏らせ、大小の混ざった疎な球の群れにする）
   float flightT = clamp(t / uFlightDur, 0.0, 1.0);
   float grow = 1.0 + uSizeGrow * pow(aSeed.z, 6.0) * smoothstep(0.15, 0.8, flightT) * survive;
-  float sizeMul = grow * mix(1.0, 0.35, fade) + aIsHero * 0.3;
-  gl_PointSize = uSizeWorld * sizeMul * uProjScale / max(-mvPosition.z, 0.05);
+  // システム指定サイズ（成長・退場フェードを反映した通常時）の画面ピクセル径。
+  float normalWorld = uSizeWorld * (grow * mix(1.0, 0.35, fade) + aIsHero * 0.3);
+  float normalPx = normalWorld * uProjScale / max(-mvPosition.z, 0.05);
+  // 切替直後は粒の画面サイズを uSwapPixelRadius（半径px）で直接指定し、写真がピクセル分割
+  // されたように見せる。uSwapSizeBoostDur 秒かけて通常サイズ(normalPx)へ収束。
+  float swapPx = uSwapPixelRadius * 2.0; // 半径→直径(px)
+  float pxSize = mix(swapPx, normalPx, smoothstep(0.0, uSwapSizeBoostDur, uTime));
+
+  // 上限クランプ: 粒は消さず（至近まで急接近する演出を活かす）、巨大化だけを頭打ちにする。
+  // 粒 1 個が塗る最大ピクセル数を固定上限に抑え、フィルレートの最悪値を保証する。
+  const float MAX_POINT_SIZE = 256.0;
+  gl_PointSize = min(pxSize, MAX_POINT_SIZE);
 }
 `;
 

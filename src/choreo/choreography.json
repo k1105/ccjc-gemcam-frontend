@@ -18,6 +18,10 @@
       "brightMin": 0.35,
       "brightMax": 1.0,
       "brightRandom": 0.25,
+      "colorFadeStart": 1.4,
+      "colorFadeEnd": 3.5,
+      "swapPixelRadius": 15.0,
+      "swapSizeBoostDur": 1.5,
       "grainImage": "",
       "sizeGrow": 6.0,
       "surviveRatio": 0.04,
@@ -26,6 +30,8 @@
       "rippleFreq": [9.0, 6.0],
       "rippleSpeed": 2.4,
       "dissolveDelaySpread": 2.2,
+      "dissolveNoiseScale": 6.0,
+      "dissolveEdge": 0.3,
       "headLead": -0.1,
       "flightDuration": 4.5,
       "lateralRadius": 0.18,
@@ -120,6 +126,7 @@
   },
   "scene": {
     "fog": { "enabled": true, "near": 3.5, "far": 16 },
+    "sky": { "enabled": false, "image": "", "intensity": 1.0, "blurriness": 0.0 },
     "glass": {
       "tint": "#ffffff",
       "roughness": 0.05,
@@ -130,7 +137,7 @@
     },
     "postfx": {
       "enabled": true,
-      "dof": { "enabled": true, "focusDistance": 3.0, "focusRange": 4.0, "bokehScale": 2.0, "resolutionScale": 0.5 },
+      "dof": { "enabled": false, "focusDistance": 3.0, "focusRange": 4.0, "bokehScale": 2.0, "resolutionScale": 0.5 },
       "afterimage": { "enabled": false, "damp": 0.85 }
     }
   }

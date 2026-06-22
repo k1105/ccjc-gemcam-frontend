@@ -33,6 +33,26 @@ export function importGrainImage(onLoad) {
   input.click();
 }
 
+/**
+ * 天球（背景）画像をローカルから選び、object URL を onPick(url, name) へ渡す。
+ * 検証用途のため data URL ではなく object URL を返す（equirectangular は大きく、
+ * data URL 化すると localStorage / JSON が肥大化するため永続化しない）。
+ * 呼び出し側は受け取った URL を environment.applySky の overrideUrl に渡してライブ確認する。
+ */
+export function pickSkyImage(onPick) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    onPick(url, file.name);
+    console.log('[Editor] 天球画像を選択:', file.name);
+  };
+  input.click();
+}
+
 export function importChoreo(choreo, onDone) {
   const input = document.createElement('input');
   input.type = 'file';

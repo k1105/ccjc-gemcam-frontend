@@ -29,7 +29,7 @@ async function boot() {
 
   // ガラスマテリアルの見え方はボトル生成より前に確定させる（ロード時に適用されるため）
   setGlassConfig(choreo.data.scene.glass);
-  const environment = createEnvironment(world.scene, choreo.data.scene.fog);
+  const environment = createEnvironment(world.scene, choreo.data.scene.fog, choreo.data.scene.sky);
   world.setupPostFX(choreo.data.scene.postfx);
 
   const bottleRack = new BottleRack(brands, choreo);

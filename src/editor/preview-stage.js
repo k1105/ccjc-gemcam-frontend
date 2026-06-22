@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PhotoParticles } from '../world/photo-particles.js';
+import { PhotoParticles, makeDissolveMaterial } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
 import { disposeObject3D } from '../core/resources.js';
 import { LightRig } from '../core/light-rig.js';
@@ -51,11 +51,18 @@ export class PreviewStage {
     this.canvas = makeTestPattern(640, Math.round(640 / world.camera.aspect));
     this.planeTexture = new THREE.CanvasTexture(this.canvas);
     this.planeTexture.colorSpace = THREE.SRGBColorSpace;
+    // 本番と同じ simplex マスクのディゾルブ材。setTime で uDTime を進めてスクラブ再現する
     this.plane = new THREE.Mesh(
       new THREE.PlaneGeometry(planeW, planeH),
-      new THREE.MeshBasicMaterial({ map: this.planeTexture, toneMapped: false })
+      makeDissolveMaterial(this.planeTexture, {
+        aspect: planeW / planeH,
+        noiseScale: gcfg.particles.dissolveNoiseScale ?? 6.0,
+        lead: gcfg.particles.rippleLead,
+        edge: gcfg.particles.dissolveEdge ?? 0.3,
+      })
     );
     this.plane.position.copy(lookPoint);
+    this.plane.renderOrder = 1; // 半透明の写真を粒（renderOrder=0）より手前へ重ねる
     world.scene.add(this.plane);
 
     const bottleScale = gcfg.bottleScale ?? 1.6;
@@ -128,9 +135,24 @@ export class PreviewStage {
     this.lightRig?.setTime(T); // ライトのキーフレーム（絶対秒）を反映
     if (!this.particles) return;
     const swapped = swapTime !== null && T >= swapTime;
-    if (this.plane) this.plane.visible = !swapped;
+    const pt = swapped ? T - swapTime : 0; // パーティクル時刻（=ディゾルブの進行）
+    const pcfg = this.ctx.choreo.data.generate.particles;
+    const lead = pcfg.rippleLead;
+
+    // 写真平面は swap 前は全面表示、swap 後は simplex マスクで穴あきに消えていき、
+    // 溶けきったら（pt >= lead）非表示に。エディタの値編集を即反映するため uniform も毎回更新。
+    if (this.plane) {
+      const shader = this.plane.material.userData.shader;
+      if (shader) {
+        shader.uniforms.uDTime.value = pt;
+        shader.uniforms.uDLead.value = lead;
+        shader.uniforms.uDNoiseScale.value = pcfg.dissolveNoiseScale ?? 6.0;
+        shader.uniforms.uDEdge.value = pcfg.dissolveEdge ?? 0.3;
+      }
+      this.plane.visible = pt < lead * 1.08;
+    }
     this.particles.points.visible = swapped;
-    this.particles.setTime(swapped ? T - swapTime : 0);
+    this.particles.setTime(pt);
   }
 
   /** camera-simulator へ渡す hero 供給（particleTime 基準） */

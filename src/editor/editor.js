@@ -1,8 +1,12 @@
 import { GUI } from 'lil-gui';
 import { PathEditor } from './path-editor.js';
 import { Timeline } from './timeline.js';
-import { exportChoreo, importChoreo, importGrainImage } from './io.js';
+import { ScreenPreview } from './screen-preview.js';
+import { exportChoreo, importChoreo, importGrainImage, pickSkyImage } from './io.js';
 import { setGlassConfig, refreshGlassMaterials } from '../world/bottle-factory.js';
+
+/** タブ名 → 画面プレビュー種別。これ以外（生成/Camera/Lights/Particles/Env）は生成ルック編集 */
+const SCREEN_TABS = { 待機: 'select', 撮影: 'shoot', リザルト: 'result' };
 
 /**
  * デバッグエディタ（Dキーでトグル）。choreography の全数値を lil-gui で編集し、
@@ -27,6 +31,7 @@ export class Editor {
   }
 
   _build() {
+    this._building = true; // build 中の _selectTab でプレビューを起動しない（_show で適用）
     this.gui = new GUI({ title: 'CCJC Choreography Editor', width: 330 });
     this.gui.domElement.style.position = 'fixed';
     this.gui.domElement.style.top = '12px';
@@ -49,38 +54,50 @@ export class Editor {
 
     const touch = () => this._touch(); // 編集を undo 履歴へ（デバウンス）
 
-    // --- カメラパス + タイムライン ---
+    // --- カメラパス + タイムライン + 画面プレビュー ---
     this.pathEditor = new PathEditor(this.ctx, this.gui);
     this.timeline = new Timeline(this.ctx, { pathEditor: this.pathEditor });
+    this.screenPreview = new ScreenPreview(this.ctx);
     this.pathEditor.timeline = this.timeline; // 定点ショットをプレイヘッド直後に挿入するため参照
     this.pathEditor.onChanged = () => {
       this.timeline.invalidate();
       touch();
     };
-    this._timelineCtrl = this.gui
-      .add({ open: () => this.timeline.toggle() }, 'open')
-      .name('🎬 Timeline（フレーム単位プレビュー）');
 
-    // --- タイミング/パラメータ（choreo JSON を再帰的にGUI化） ---
+    // --- 画面ごとのタブ: 各画面のプレビューを開いた状態でそのパラメータを編集 ---
     const onTuned = () => {
       // ラック系は SELECT 待機中ならレイアウトへ即反映
       if (manager.is('select')) bottleRack.applyLayout();
       touch();
     };
-    const tune = this.gui.addFolder('Parameters');
-    buildGuiFromObject(tune.addFolder('select'), choreo.data.select, { onChange: onTuned });
-    buildGuiFromObject(tune.addFolder('shoot'), choreo.data.shoot, { onChange: touch });
-    // generate: カメラ編成に効く値はタイムラインへ通知（particles は別タブへ）
-    const gen = tune.addFolder('generate');
-    buildGuiFromObject(gen, choreo.data.generate, {
+
+    // タブを開くとその画面が自動でプレビューされる（明示ボタンは不要）。
+    // ⟳ ボタンだけは「演出の再生」という固有アクションなので残す。
+
+    // 待機（SELECT）: ラック/沈下/復帰/カメラ
+    const selectFolder = this.gui.addFolder('待機');
+    buildGuiFromObject(selectFolder, choreo.data.select, { onChange: onTuned });
+
+    // 撮影（SHOOT）: カウントダウン間隔 / シャッター後ディレイ
+    const shootFolder = this.gui.addFolder('撮影');
+    shootFolder.add({ replay: () => this.screenPreview.replay() }, 'replay').name('⟳ カウントダウンを再生');
+    buildGuiFromObject(shootFolder, choreo.data.shoot, { onChange: touch });
+
+    // 生成（GENERATE）パラメータ: カメラ編成に効く値はタイムラインへ通知（path/particles/lights は専用サブタブ）
+    const generateFolder = this.gui.addFolder('生成');
+    generateFolder.add({ timeline: () => this.timeline.toggle() }, 'timeline').name('🎬 Timeline 表示/非表示');
+    buildGuiFromObject(generateFolder, choreo.data.generate, {
       skipKeys: ['path', 'particles', 'times', 'lights'], // パス/時刻/ライトは PathEditor で編集
       onChange: () => {
         this.timeline.invalidate();
         touch();
       },
     });
-    buildGuiFromObject(tune.addFolder('result'), choreo.data.result, { onChange: touch });
-    tune.folders.forEach((f) => f.close());
+
+    // リザルト（RESULT）: フェードイン / スタガー / 滞留 / アウトロ
+    const resultFolder = this.gui.addFolder('リザルト');
+    resultFolder.add({ replay: () => this.screenPreview.replay() }, 'replay').name('⟳ イントロ/アウトロを再生');
+    buildGuiFromObject(resultFolder, choreo.data.result, { onChange: touch });
 
     // particles は専用タブ（独立トップレベル）。シェーダ uniform に焼かれるため
     // scene:true でプレビューの粒を再構築する
@@ -110,14 +127,24 @@ export class Editor {
     const envFolder = this.gui.addFolder('environment');
     this._buildEnvFolder(envFolder);
 
-    // --- タブ化（同時に操作しないものをタブへ。Config IO/Timeline は常時表示） ---
+    // --- タブ化 ---
+    // 最上位＝ページ選択（待機/撮影/生成/リザルト）。生成ルックの編集（Camera/Lights/
+    // Particles/Env）は「生成」の内側にサブタブとしてネストする。
     this._setupTabs({
-      Camera: this.pathEditor.gui,
-      Lights: this.pathEditor.lightsGui,
-      Particles: particlesFolder,
-      Scene: tune,
-      Env: envFolder,
+      待機: selectFolder,
+      撮影: shootFolder,
+      生成: {
+        sub: {
+          パラメータ: generateFolder,
+          Camera: this.pathEditor.gui,
+          Lights: this.pathEditor.lightsGui,
+          Particles: particlesFolder,
+          Env: envFolder,
+        },
+      },
+      リザルト: resultFolder,
     });
+    this._building = false;
   }
 
   /**
@@ -138,6 +165,33 @@ export class Editor {
     fog.add(scene.fog, 'near', 0, 20, 0.1).name('near（手前の素通し境界）').onChange(applyFog);
     fog.add(scene.fog, 'far', 1, 60, 0.5).name('far（背景に溶ける距離）').onChange(applyFog);
 
+    // --- 天球（equirectangular 背景画像）。任意ファイルを選んで見え方を検証できる。
+    const applySky = () => {
+      environment.applySky(scene.sky);
+      touch();
+    };
+    const sky = folder.addFolder('sky（天球背景）');
+    const enabledCtrl = sky.add(scene.sky, 'enabled').name('有効').onChange(applySky);
+    sky.add(scene.sky, 'image').name('画像URL/パス').onChange(applySky);
+    sky.add(scene.sky, 'intensity', 0, 3, 0.01).name('明るさ').onChange(applySky);
+    sky.add(scene.sky, 'blurriness', 0, 1, 0.01).name('ぼかし').onChange(applySky);
+    // ローカルから任意ファイルを選んでライブ検証（object URL なので永続化はしない）。
+    // 採用する画像が決まったら public/ 等に置き、上の「画像URL/パス」へそのパスを入力する運用。
+    sky
+      .add(
+        {
+          pick: () =>
+            pickSkyImage((url, name) => {
+              scene.sky.enabled = true;
+              enabledCtrl.updateDisplay();
+              environment.applySky(scene.sky, url); // cfg.image を無視して選んだファイルを即適用
+              console.log('[Editor] 天球プレビュー中（未保存）:', name);
+            }),
+        },
+        'pick'
+      )
+      .name('ファイルを選んで確認（未保存）');
+
     const applyGlass = () => {
       setGlassConfig(scene.glass);
       refreshGlassMaterials(world.scene);
@@ -156,23 +210,29 @@ export class Editor {
   }
 
   /**
-   * トップレベルのフォルダ群をタブで出し分ける。lil-gui にタブは無いので、
-   * タブバーを自作し、選択タブの中身フォルダだけ表示する（残りは display:none）。
-   * 各タブの中身は常に開いた状態にし、冗長なフォルダ見出しは隠す。
+   * 2階層タブで出し分ける（lil-gui にタブは無いので自作）。map の値は
+   * フォルダ（葉タブ）か { sub: {...} }（サブタブ群）。最上位＝ページ選択、
+   * サブ＝生成ルックの編集面。選択タブの中身だけ表示し、残りは display:none。
+   * 各フォルダは常に開いた状態にして冗長なフォルダ見出しは隠す。
    */
   _setupTabs(map) {
     injectTabStyles();
-    this._tabFolders = map;
     const names = Object.keys(map);
 
-    for (const f of Object.values(map)) {
-      f.open();
-      f.$title.style.display = 'none';
+    // 葉/サブ問わず全フォルダを開いて見出しを隠す
+    for (const v of Object.values(map)) {
+      const folders = v.sub ? Object.values(v.sub) : [v];
+      for (const f of folders) {
+        f.open();
+        f.$title.style.display = 'none';
+      }
     }
 
     const bar = document.createElement('div');
     bar.className = 'editor-tabbar';
     this._tabButtons = {};
+    this._tabEls = {}; // トップ名 → 表示切替する DOM（葉=folder.domElement / 群=wrapper）
+    this._subGroups = {}; // トップ名 → { map, buttons, names }（sub を持つタブのみ）
     for (const name of names) {
       const btn = document.createElement('button');
       btn.className = 'editor-tab';
@@ -182,27 +242,100 @@ export class Editor {
       this._tabButtons[name] = btn;
     }
 
-    // DOM 並び: Config IO / 🎬 Timeline / タブバー / 各タブ中身
+    // DOM 並び: Config IO / タブバー / 各タブ中身（生成はサブタブバー＋サブ中身を内包）
     const c = this.gui.$children;
-    c.appendChild(this._timelineCtrl.domElement);
     c.appendChild(bar);
-    for (const name of names) c.appendChild(map[name].domElement);
+    for (const name of names) {
+      const v = map[name];
+      if (v.sub) {
+        const wrapper = document.createElement('div');
+        const subBar = document.createElement('div');
+        subBar.className = 'editor-tabbar editor-subtabbar';
+        const subButtons = {};
+        const subNames = Object.keys(v.sub);
+        for (const sn of subNames) {
+          const sb = document.createElement('button');
+          sb.className = 'editor-tab editor-subtab';
+          sb.textContent = sn;
+          sb.addEventListener('click', () => this._selectSubTab(name, sn));
+          subBar.appendChild(sb);
+          subButtons[sn] = sb;
+        }
+        wrapper.appendChild(subBar);
+        for (const sn of subNames) wrapper.appendChild(v.sub[sn].domElement);
+        c.appendChild(wrapper);
+        this._tabEls[name] = wrapper;
+        this._subGroups[name] = { map: v.sub, buttons: subButtons, names: subNames };
+      } else {
+        c.appendChild(v.domElement);
+        this._tabEls[name] = v.domElement;
+      }
+    }
 
-    // 直前のタブを rebuild をまたいで復元。無ければ先頭タブ
-    this._selectTab(this._activeTab && map[this._activeTab] ? this._activeTab : names[0]);
+    // 直前のタブを rebuild をまたいで復元。初回は 生成（D 押下で従来通り Timeline ＋ 俯瞰）
+    this._selectTab(this._activeTab && map[this._activeTab] ? this._activeTab : '生成');
   }
 
   _selectTab(name) {
     this._activeTab = name;
-    for (const [n, f] of Object.entries(this._tabFolders)) {
-      f.domElement.style.display = n === name ? '' : 'none';
+    for (const [n, el] of Object.entries(this._tabEls)) {
+      el.style.display = n === name ? '' : 'none';
       this._tabButtons[n].classList.toggle('active', n === name);
+    }
+    // サブタブ群なら、サブも選択（前回 or 先頭）
+    const group = this._subGroups[name];
+    if (group) {
+      const sub = this._activeSubTab && group.map[this._activeSubTab] ? this._activeSubTab : group.names[0];
+      this._selectSubTab(name, sub);
+    }
+    this._applyTabPreview(name);
+  }
+
+  /** 生成タブ内のサブタブ切替（ページ＝プレビュー状態は変えない） */
+  _selectSubTab(groupName, subName) {
+    const group = this._subGroups[groupName];
+    if (!group) return;
+    this._activeSubTab = subName;
+    for (const [sn, f] of Object.entries(group.map)) {
+      f.domElement.style.display = sn === subName ? '' : 'none';
+      group.buttons[sn].classList.toggle('active', sn === subName);
+    }
+  }
+
+  /**
+   * 最上位タブ（ページ）に応じてプレビュー状態を切り替える。
+   * 画面ページ（待機/撮影/リザルト）= Timeline を閉じて DOM/待機プレビュー。
+   * 生成ページ（サブタブ Camera/Lights/Particles/Env 共通）= オーバーレイを畳んで Timeline。
+   */
+  _applyTabPreview(name) {
+    if (!this.visible || this._building) return; // build 時・非表示中は何もしない（_show で改めて適用）
+    const screen = SCREEN_TABS[name];
+    // 生成カメラのギズモ/パスは生成ルックタブのときだけ表示（画面プレビューには無関係なので隠す）
+    const wantPath = !screen;
+    if (this._pathActive !== wantPath) {
+      this.pathEditor.setActive(wantPath);
+      this._pathActive = wantPath;
+    }
+    if (screen) {
+      if (this.timeline.isOpen) this.timeline.close();
+      this.screenPreview.show(screen);
+    } else {
+      this.screenPreview.hide();
+      if (!this.timeline.isOpen) {
+        this.timeline.open().then(() => {
+          // D 押下直後と同じく俯瞰から始める（初回のみ意味がある）
+          if (this.visible && this.timeline.isOpen && !SCREEN_TABS[this._activeTab]) {
+            this.timeline._setViewMode('free');
+          }
+        });
+      }
     }
   }
 
   /** import 後などの全再構築 */
   rebuild() {
     const wasVisible = this.visible;
+    this.screenPreview.hide();
     this.timeline.dispose();
     this.pathEditor.dispose();
     this.gui.destroy();
@@ -228,18 +361,17 @@ export class Editor {
   _show() {
     this.visible = true;
     this.gui.show();
-    this.pathEditor.setActive(true);
     document.body.classList.add('editor-active');
-    // D 押下で直接 Timeline ＋ 視点:Free から始める
-    this.timeline.open().then(() => {
-      if (this.visible && this.timeline.isOpen) this.timeline._setViewMode('free');
-    });
+    // アクティブタブに応じてプレビューを起動（生成系なら Timeline ＋ 俯瞰＋パス編集、画面系なら DOM）
+    this._pathActive = null; // _applyTabPreview に setActive を強制させる
+    this._applyTabPreview(this._activeTab);
   }
 
   _hide() {
     this.visible = false;
     this.gui.hide();
     this.timeline.close();
+    this.screenPreview.hide();
     this.pathEditor.setActive(false);
     document.body.classList.remove('editor-active');
   }
@@ -304,6 +436,7 @@ export class Editor {
     const sc = this.ctx.choreo.data.scene;
     if (sc) {
       this.ctx.environment.applyFog?.(sc.fog);
+      this.ctx.environment.applySky?.(sc.sky);
       setGlassConfig(sc.glass);
       refreshGlassMaterials(this.ctx.world.scene);
     }
@@ -314,6 +447,7 @@ export class Editor {
   dispose() {
     window.removeEventListener('keydown', this._onKeyDown);
     clearTimeout(this._commitTimer);
+    this.screenPreview.dispose();
     this.timeline.dispose();
     this.pathEditor.dispose();
     this.gui.destroy();
@@ -367,6 +501,15 @@ function injectTabStyles() {
 .editor-tab:hover { color: #e8e8ee; border-color: #555; }
 .editor-tab.active {
   background: #2c6cff; color: #fff; border-color: #2c6cff;
+}
+/* 生成タブ内のサブタブ（一段細く・くすませて階層を示す） */
+.editor-subtabbar { margin: 2px 0 6px; padding-left: 10px; }
+.editor-subtab {
+  padding: 4px 3px; font-size: 10px;
+  background: #17171b; color: #9a9aa8; border-color: #33333d;
+}
+.editor-subtab.active {
+  background: #284a92; color: #fff; border-color: #284a92;
 }
 `;
   document.head.appendChild(style);
@@ -428,6 +571,10 @@ const PARTICLE_LABELS = {
   brightMin: '明度レンジ・最小',
   brightMax: '明度レンジ・最大',
   brightRandom: '明度ランダム度',
+  colorFadeStart: '色フェード・開始秒',
+  colorFadeEnd: '色フェード・終了秒',
+  swapPixelRadius: '切替直後の粒半径(px)',
+  swapSizeBoostDur: '切替直後サイズ・収束秒',
   sizeGrow: '成長量',
   surviveRatio: '生存率',
   rippleLead: '波・開始遅延',
@@ -435,6 +582,8 @@ const PARTICLE_LABELS = {
   rippleFreq: '波・周波数 [x, y]',
   rippleSpeed: '波・速度',
   dissolveDelaySpread: '飛散の遅延ばらつき',
+  dissolveNoiseScale: 'ディゾルブ・ノイズ細かさ',
+  dissolveEdge: 'ディゾルブ・境界ぼかし幅',
   headLead: '先頭の車間',
   flightDuration: '飛行時間',
   lateralRadius: '横ずれ半径',

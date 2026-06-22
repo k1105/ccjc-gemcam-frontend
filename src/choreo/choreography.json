@@ -110,16 +110,18 @@
   },
   "result": {
     "imageFadeIn": 0.9,
-    "stagger": [
-      { "el": "textBL", "delay": 0.7, "duration": 0.6, "y": 24, "ease": "power2.out" },
-      { "el": "logoTR", "delay": 0.95, "duration": 0.6, "y": -24, "ease": "power2.out" },
-      { "el": "brandBR", "delay": 1.2, "duration": 0.7, "x": 32, "ease": "power2.out" }
-    ],
+    "rect": {
+      "heightPct": 10,
+      "dropDuration": 0.7,
+      "dropEase": "power2.out",
+      "holdFull": 0.15,
+      "settleDuration": 0.9,
+      "settleEase": "power3.inOut"
+    },
     "dwell": 8.0,
     "outro": {
       "imageSlideDown": 0.8,
       "imageSlideEase": "power2.in",
-      "elementsStagger": 0.12,
       "elementDuration": 0.45,
       "whiteHold": 0.7
     }

@@ -2,7 +2,7 @@
   --bg-white: #f5f5f7;
   --ink: #1d1d1f;
   --ink-soft: #6e6e73;
-  font-family: 'Outfit', 'Noto Sans JP', sans-serif;
+  font-family: "Outfit", "Noto Sans JP", sans-serif;
 }
 
 * {
@@ -11,7 +11,8 @@
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -81,7 +82,7 @@ body.editor-active * {
 }
 
 #shoot-caption .caption-main {
-  font-family: 'Noto Sans JP', sans-serif;
+  font-family: "Noto Sans JP", sans-serif;
   font-size: 34px;
   font-weight: 700;
   letter-spacing: 0.32em;
@@ -115,10 +116,22 @@ body.editor-active * {
 }
 
 @keyframes countdown-tick {
-  0%   { opacity: 0; transform: scale(1.25); }
-  18%  { opacity: 1; transform: scale(1.0); }
-  80%  { opacity: 1; transform: scale(0.96); }
-  100% { opacity: 0; transform: scale(0.92); }
+  0% {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
 }
 
 /* --- RESULT --- */
@@ -136,45 +149,32 @@ body.editor-active * {
   opacity: 0;
 }
 
-#result-text-bl {
+/* 左上ロゴ（public/blk_next_chapter_of_growth.svg） */
+#result-logo {
   position: absolute;
   left: 4.5vw;
-  bottom: 5.5vh;
-  font-size: 13px;
-  line-height: 1.9;
-  letter-spacing: 0.14em;
-  color: var(--ink-soft);
-  opacity: 0;
-}
-
-#result-logo-tr {
-  position: absolute;
-  right: 4.5vw;
   top: 5.5vh;
-  font-weight: 800;
-  font-size: 22px;
-  letter-spacing: 0.3em;
-  color: var(--ink);
+  height: 7vh;
+  width: auto;
   opacity: 0;
 }
 
-#result-logo-tr img {
-  display: block;
-  max-height: 9vh;
-  max-width: 18vw;
-}
-
-#result-brand-br {
+/*
+ * 下端のブランドカラー帯。高さは常に 100vh で確保し、見え方は scaleY で制御する。
+ * 入場時は transform-origin:top で 0→1（上から登場して全画面を覆う）、その後
+ * transform-origin:bottom に切り替えて 1→0.1（下端を固定して画面高さ10%に定着）。
+ * background-color はブランドごとに JS で上書きする。
+ */
+#result-rect {
   position: absolute;
-  right: 4.5vw;
-  bottom: 5.5vh;
-  writing-mode: vertical-rl;
-  font-family: 'Noto Serif JP', 'Noto Sans JP', serif;
-  font-weight: 500;
-  font-size: 26px;
-  letter-spacing: 0.32em;
-  color: var(--ink);
-  opacity: 0;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100vh;
+  background: #000;
+  transform: scaleY(0);
+  transform-origin: top center;
+  will-change: transform;
 }
 
 /* --- flash / whiteout overlay --- */

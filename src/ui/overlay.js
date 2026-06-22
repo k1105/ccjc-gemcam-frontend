@@ -17,10 +17,8 @@ export class Overlay {
     this.flash = document.getElementById('flash-overlay');
     this.result = {
       image: document.getElementById('result-image'),
-      textBL: document.getElementById('result-text-bl'),
-      logoTR: document.getElementById('result-logo-tr'),
-      logoImg: document.getElementById('result-logo-img'),
-      brandBR: document.getElementById('result-brand-br'),
+      logo: document.getElementById('result-logo'),
+      rect: document.getElementById('result-rect'),
     };
   }
 

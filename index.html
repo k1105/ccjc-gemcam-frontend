@@ -5,9 +5,12 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CCJC Experience</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <!-- Fullscreen 3D canvas -->
@@ -23,16 +26,16 @@
       <div id="countdown" class="hidden">3</div>
     </div>
 
-    <!-- RESULT: bare image + staged typography -->
+    <!-- RESULT: bare image + top-left logo + brand-colored bottom rectangle -->
     <div id="screen-result" class="screen hidden">
       <img id="result-image" src="" alt="" draggable="false" />
-      <div id="result-text-bl">
-        <p>A moment, sealed in light.</p>
-        <p>Crafted from a single photograph,</p>
-        <p>bottled just for you.</p>
-      </div>
-      <div id="result-logo-tr"><img id="result-logo-img" alt="" draggable="false" hidden /></div>
-      <div id="result-brand-br">ブランド名</div>
+      <img
+        id="result-logo"
+        src="/blk_next_chapter_of_growth.svg"
+        alt="Next Chapter of Growth"
+        draggable="false"
+      />
+      <div id="result-rect"></div>
     </div>
 
     <!-- White flash / transition overlay -->

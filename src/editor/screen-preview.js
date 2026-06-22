@@ -79,13 +79,16 @@ export class ScreenPreview {
     const els = overlay.result;
     const brand = brands.list[0];
     els.image.src = makeResultTestImage(1280, 1600);
-    els.brandBR.textContent = brand?.label ?? 'ブランド名';
-    // ロゴは画像パス依存を避けてラベル文字で代用（レイアウト/タイミング確認には十分）
-    els.logoImg.hidden = true;
-    els.logoTR.textContent = brand?.label ?? 'LOGO';
+    els.rect.style.backgroundColor = brand?.themeColor || '#000';
     overlay.hideAll();
     gsap.set(els.image, { opacity: 1, y: 0 });
-    gsap.set([els.textBL, els.logoTR, els.brandBR], { opacity: 1, x: 0, y: 0 });
+    gsap.set(els.logo, { opacity: 1, y: 0 });
+    // 定着後の見え方（下端固定で画面高さ10%）を静止プレビューで再現
+    gsap.set(els.rect, {
+      y: 0,
+      scaleY: this.ctx.choreo.data.result.rect.heightPct / 100,
+      transformOrigin: 'bottom center',
+    });
     overlay.show('result');
   }
 
@@ -128,20 +131,17 @@ export class ScreenPreview {
     // イントロ初期状態（本番 result.js enter のミラー）
     this._showResult();
     gsap.set(els.image, { opacity: 0, y: 0 });
-    gsap.set([els.textBL, els.logoTR, els.brandBR], { opacity: 0, x: 0, y: 0 });
+    gsap.set(els.logo, { opacity: 0 });
+    gsap.set(els.rect, { scaleY: 0, transformOrigin: 'top center' });
 
+    const r = rcfg.rect;
     await this._playTimeline((tl) => {
-      tl.to(els.image, { opacity: 1, duration: rcfg.imageFadeIn, ease: 'power2.out' }, 0);
-      for (const item of rcfg.stagger) {
-        const el = els[item.el];
-        if (!el) continue;
-        tl.fromTo(
-          el,
-          { opacity: 0, x: item.x ?? 0, y: item.y ?? 0 },
-          { opacity: 1, x: 0, y: 0, duration: item.duration, ease: item.ease },
-          item.delay
-        );
-      }
+      tl.to(els.rect, { scaleY: 1, duration: r.dropDuration, ease: r.dropEase }, 0);
+      tl.set(els.rect, { transformOrigin: 'bottom center' }, r.dropDuration);
+      tl.to(els.rect, { scaleY: r.heightPct / 100, duration: r.settleDuration, ease: r.settleEase }, r.dropDuration + r.holdFull);
+      // rect が画面全体を覆い切ってから結果・ロゴが登場
+      tl.to(els.image, { opacity: 1, duration: rcfg.imageFadeIn, ease: 'power2.out' }, r.dropDuration);
+      tl.to(els.logo, { opacity: 1, duration: rcfg.imageFadeIn, ease: 'power2.out' }, r.dropDuration);
     }, token);
     if (token !== this._animToken) return;
 
@@ -150,11 +150,11 @@ export class ScreenPreview {
 
     // アウトロ（本番 result.js _outro のミラー）
     const o = rcfg.outro;
+    const bandH = window.innerHeight * (r.heightPct / 100);
     await this._playTimeline((tl) => {
       tl.to(els.image, { y: window.innerHeight, duration: o.imageSlideDown, ease: o.imageSlideEase }, 0);
-      [els.textBL, els.logoTR, els.brandBR].forEach((el, i) => {
-        tl.to(el, { opacity: 0, duration: o.elementDuration, ease: 'power2.in' }, o.imageSlideDown * 0.5 + i * o.elementsStagger);
-      });
+      tl.to(els.rect, { y: bandH, duration: o.imageSlideDown, ease: o.imageSlideEase }, 0);
+      tl.to(els.logo, { y: 40, opacity: 0, duration: o.elementDuration, ease: 'power2.in' }, 0);
       tl.to({}, { duration: o.whiteHold });
     }, token);
     if (token !== this._animToken) return;
@@ -191,7 +191,7 @@ export class ScreenPreview {
     }
     const { overlay } = this.ctx;
     const els = overlay.result;
-    gsap.killTweensOf([overlay.shootCaption, overlay.flash, els.image, els.textBL, els.logoTR, els.brandBR]);
+    gsap.killTweensOf([overlay.shootCaption, overlay.flash, els.image, els.logo, els.rect]);
   }
 
   /** プレビューで触ったインラインスタイルを除去して CSS 既定へ戻す */
@@ -199,7 +199,7 @@ export class ScreenPreview {
     const { overlay } = this.ctx;
     const els = overlay.result;
     gsap.set(
-      [overlay.screens.shoot, overlay.screens.result, overlay.shootCaption, overlay.flash, els.image, els.textBL, els.logoTR, els.brandBR],
+      [overlay.screens.shoot, overlay.screens.result, overlay.shootCaption, overlay.flash, els.image, els.logo, els.rect],
       { clearProps: 'opacity,transform' }
     );
   }

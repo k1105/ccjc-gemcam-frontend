@@ -30,5 +30,8 @@
     "lil-gui": "^0.21.0",
     "postprocessing": "^6.39.1",
     "three": "^0.184.0"
+  },
+  "overrides": {
+    "gaxios": "^7"
   }
 }

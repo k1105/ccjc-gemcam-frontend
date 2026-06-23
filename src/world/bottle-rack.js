@@ -33,10 +33,21 @@ export class BottleRack {
       spin.add(model);
       root.add(spin);
 
+      // 選択時の opacity 演出用に、このボトルの全マテリアルを集めておく
+      const mats = [];
+      model.traverse((o) => {
+        if (!o.material) return;
+        const a = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of a) {
+          m.transparent = true; // opacity を効かせるため
+          mats.push(m);
+        }
+      });
+
       const baseX = -totalWidth / 2 + i * cfg.spacing;
       root.position.set(baseX, 0, 0);
       this.group.add(root);
-      this.bottles.set(brand.slug, { root, spin, baseX, index: i });
+      this.bottles.set(brand.slug, { root, spin, baseX, index: i, mats });
     });
 
     this.group.position.set(0, cfg.y, cfg.z);
@@ -77,18 +88,38 @@ export class BottleRack {
   /** 選択ボトルを回転させながら画面下へ沈めて非表示にする */
   selectAndSink(slug, bag) {
     const cfg = this.choreo.data.select.sink;
+    const hl = this.choreo.data.select.highlight;
     const entry = this.bottles.get(slug);
     if (!entry) return Promise.resolve();
 
     this.swayEnabled = false;
     return new Promise((resolve) => {
       const tl = bag.timeline({ onComplete: resolve });
+
+      // 選択強調: 非選択ボトルを opacity=dimOpacity へ、選択ボトルを scale 倍へ。
+      // いずれも滑らかなイージングで t=0 から同時に進める。
+      let sinkAt = cfg.preDelay;
+      if (hl) {
+        for (const other of this.bottles.values()) {
+          if (other === entry) continue;
+          for (const m of other.mats) {
+            tl.to(m, { opacity: hl.dimOpacity, duration: hl.duration, ease: hl.ease }, 0);
+          }
+        }
+        tl.to(entry.spin.scale, {
+          x: hl.scale, y: hl.scale, z: hl.scale,
+          duration: hl.duration, ease: hl.ease,
+        }, 0);
+        // 強調を見せきってから沈める（hold ぶん間を置く）
+        sinkAt = hl.duration + (hl.hold ?? 0) + cfg.preDelay;
+      }
+
       // 画像板なので回転はさせず、下へ沈める動きだけ
       tl.to(entry.root.position, {
         y: cfg.dropY,
         duration: cfg.duration,
         ease: cfg.ease,
-      }, cfg.preDelay);
+      }, sinkAt);
       tl.add(() => {
         entry.root.visible = false;
       });
@@ -98,13 +129,17 @@ export class BottleRack {
 
   /** 強制リセット用: 全ボトルを即座に定位置へ */
   resetInstant() {
-    for (const { root, spin, baseX } of this.bottles.values()) {
+    for (const { root, spin, baseX, mats } of this.bottles.values()) {
       gsap.killTweensOf(root.position);
       gsap.killTweensOf(spin.rotation);
+      gsap.killTweensOf(spin.scale);
+      mats.forEach((m) => gsap.killTweensOf(m));
       root.visible = true;
       root.position.set(baseX, 0, 0);
       spin.position.set(0, 0, 0);
       spin.rotation.set(0, 0, 0);
+      spin.scale.set(1, 1, 1);
+      mats.forEach((m) => { m.opacity = 1; });
     }
     this.swayEnabled = true;
   }
@@ -117,6 +152,9 @@ export class BottleRack {
       entry.root.visible = false;
       entry.root.position.set(entry.baseX, cfg.fromY, 0);
       entry.spin.position.set(0, 0, 0);
+      // 前ループで付いた選択強調（拡大・減光）を戻す
+      entry.spin.scale.set(1, 1, 1);
+      entry.mats.forEach((m) => { m.opacity = 1; });
     }
   }
 

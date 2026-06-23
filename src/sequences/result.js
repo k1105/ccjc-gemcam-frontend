@@ -2,6 +2,7 @@ import gsap from 'gsap';
 import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag } from '../core/resources.js';
 import { playSfx } from '../core/audio.js';
+import { crushNearWhiteUrl } from '../core/near-white.js';
 
 /**
  * RESULT: 生成画像が装飾なしで中央フェードイン。左上に Next Chapter of Growth ロゴ、
@@ -17,7 +18,9 @@ export class ResultSequence extends Sequence {
     const rcfg = choreo.data.result;
     const els = overlay.result;
 
-    els.image.src = result.imageUrl;
+    // 生成画像の near-white を完全な #ffffff に潰してから表示する（閾値 230 固定）。
+    // CORS 未設定等で潰しに失敗した場合は元 URL にフォールバックされる。
+    els.image.src = await crushNearWhiteUrl(result.imageUrl);
     els.rect.style.backgroundColor = brand.themeColor || '#000';
 
     // 初期状態リセット（前回アウトロの y 移動も戻す）

@@ -1,10 +1,14 @@
 // Gemini 画像生成（gemini-3.1-flash-image / Nano Banana 2）
 // 自撮り写真 + 商品参照画像 + プロンプトを渡し、4等身3DCGキャラ画像を生成する。
 import { readFileSync } from 'node:fs';
-import { extname } from 'node:path';
+import { extname, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { GoogleGenAI } from '@google/genai';
 import { getBrand, resolveProductImagePath } from './brands.js';
 import { getAttemptOrder } from './api-keys.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROMPT_PATH = resolve(__dirname, '..', 'config', 'generation-prompt.txt');
 
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-image';
 
@@ -37,14 +41,26 @@ function isKeyExhausted(err) {
   return status === 429 || status === 401 || status === 403;
 }
 
-// 環境変数でプロンプト雛形を差し替え可能。{brand_label} と {brand_fragment} を展開する。
-const DEFAULT_PROMPT_TEMPLATE = [
+// プロンプト雛形は config/generation-prompt.txt で管理する。
+// {brand_label} と {brand_fragment} を展開できる（無くてもよい）。
+// ファイルが読めない場合の最終フォールバック。
+const FALLBACK_PROMPT_TEMPLATE = [
   '参照写真に写っている人物（複数人の場合は全員）を、4頭身にデフォルメした可愛い3DCGキャラクターに変換してください。',
   '本人の髪型・髪色・服装・顔の特徴・表情の雰囲気を残しつつ、ツヤのあるトイフィギュア風／コマーシャルポップな3DCGスタイルで描いてください。',
   '{brand_fragment}',
   'キャラクターと飲料商品を一緒に、明るくカラフルなスタジオ背景の正方形構図で配置してください。',
   'ブランド: {brand_label}',
 ].join('\n');
+
+// 編集が即反映されるよう毎回ファイルを読む（生成1回が数秒なので読み込みコストは無視できる）。
+function loadPromptTemplate() {
+  try {
+    return readFileSync(PROMPT_PATH, 'utf-8');
+  } catch (err) {
+    console.warn(`[gemini] ${PROMPT_PATH} を読めませんでした — フォールバック雛形を使用: ${err.message}`);
+    return FALLBACK_PROMPT_TEMPLATE;
+  }
+}
 
 // キーごとにクライアントを使い回す（毎回 new するとコネクション再確立で遅くなるため）。
 const _clients = new Map();
@@ -65,8 +81,7 @@ function mimeFromPath(p) {
 }
 
 function buildPrompt(brand) {
-  const template = process.env.GENERATION_PROMPT_TEMPLATE || DEFAULT_PROMPT_TEMPLATE;
-  return template
+  return loadPromptTemplate()
     .replace(/\{brand_label\}/g, brand.label)
     .replace(/\{brand_fragment\}/g, brand.promptFragment || '');
 }

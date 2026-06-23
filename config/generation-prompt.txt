@@ -1,0 +1,14 @@
+Two reference images. IMAGE 1 = the person/people. IMAGE 2 = a drink bottle.
+
+Turn the people in IMAGE 1 into cute, pop designer-toy 3DCG characters with a MODERATE, friendly deformation — slightly oversized head, clean simplified appealing face, smooth toy body, glossy vinyl/plastic. Keep it cute and clean; do NOT over-deform, and never make scary, grotesque, or uncanny faces.
+
+Count & separation: output EXACTLY one character per person in IMAGE 1, each a SEPARATE, complete, free-standing figure with its own single head and body. Never fuse or merge people, and never add a clone, twin, or mirrored copy. If IMAGE 1 has ONE person, render ONE character only.
+
+Stay faithful to the sources: keep each person's natural pose (do not exaggerate), identity, outfit, and real colors (do not recolor). Reproduce the bottle EXACTLY — silhouette, proportions, cap, label design and colors unchanged; never composite the people onto the label.
+
+Relationship: stage each character physically interacting with the oversized bottle as a prop — leaning a shoulder or back against it, resting a hand on it, sitting on its base, or peeking around it. Choose the contact that naturally fits that character's KEPT pose; do not change or exaggerate the pose. Avoid a flat, unrelated "just placed side by side" look.
+
+Each character: full body head to toe, one head and face, normal limbs, fully clothed.
+
+Layout: square 1:1, composed for visual balance — the bottle need NOT be dead-centre. Keep the bottle a consistent size (about 75% of the image height) and arrange the character(s) in relation to it.
+Background: present the subjects as a clean cut-out / e-commerce packshot, isolated on a flat, perfectly uniform pure-white #ffffff fill — like an alpha matte / clipping path. The white is a single solid fill, NOT a lit surface: no gradient, gray, off-white, shadow, floor, texture, or text. Keep crisp clean edges around the subjects. Bright commercial studio lighting on the subjects only.

@@ -16,6 +16,8 @@ loadKeys();
 
 const app = express();
 const PORT = process.env.PORT || 8787;
+// このPCがどのブースか（例: A / B）。生成結果に booth として記録する。未設定なら記録しない。
+const BOOTH_ID = (process.env.BOOTH_ID || '').trim() || undefined;
 
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
@@ -31,6 +33,7 @@ function parseDataUrl(image) {
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
+    booth: BOOTH_ID || null,
     model: process.env.GEMINI_MODEL || 'gemini-3.1-flash-image',
     mock: process.env.MOCK_GENERATION === 'true',
     keyCount: getMaskedKeys().count,
@@ -114,6 +117,7 @@ app.post('/api/generate', async (req, res) => {
         brandSlug: brand.slug,
         brandLabel: brand.label,
         imageUrl,
+        booth: BOOTH_ID,
       });
     } catch (storageErr) {
       stored = false;
@@ -131,7 +135,7 @@ app.post('/api/generate', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`[ccjc booth backend] listening on http://localhost:${PORT}`);
+  console.log(`[ccjc booth backend] listening on http://localhost:${PORT}${BOOTH_ID ? ` (booth=${BOOTH_ID})` : ' (booth未設定)'}`);
   if (process.env.MOCK_GENERATION === 'true') {
     console.log('[ccjc booth backend] MOCK_GENERATION=true (Gemini/Storage/Firestore を呼ばずモック応答)');
   } else if (!hasKeys()) {

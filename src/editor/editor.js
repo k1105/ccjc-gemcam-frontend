@@ -3,6 +3,7 @@ import { PathEditor } from './path-editor.js';
 import { Timeline } from './timeline.js';
 import { SoundEditor } from './sound-editor.js';
 import { ScreenPreview } from './screen-preview.js';
+import { BottleEditor } from './bottle-editor.js';
 import { exportChoreo, importChoreo, importGrainImage, pickSkyImage } from './io.js';
 import { setGlassConfig, refreshGlassMaterials } from '../world/bottle-factory.js';
 
@@ -83,8 +84,19 @@ export class Editor {
     // ⟳ ボタンだけは「演出の再生」という固有アクションなので残す。
 
     // 待機（SELECT）: ラック/沈下/復帰/カメラ
+    // overrides（飲料ごとのサイズ・ベースライン）はクリック選択UI（BottleEditor）で
+    // 編集するので、汎用ツリー生成からは除外する。
     const selectFolder = this.gui.addFolder('待機');
-    buildGuiFromObject(selectFolder, choreo.data.select, { onChange: onTuned });
+    buildGuiFromObject(selectFolder, choreo.data.select, { onChange: onTuned, skipKeys: ['overrides'] });
+
+    // 飲料 個別調整: 待機プレビュー中にキャンバスのボトルをクリックして編集
+    this.bottleEditor = new BottleEditor(this.ctx, {
+      onChange: () => {
+        if (manager.is('select')) bottleRack.applyLayout();
+        touch();
+      },
+    });
+    this.bottleEditor.attach(selectFolder);
 
     // 撮影（SHOOT）: カウントダウン間隔 / シャッター後ディレイ
     const shootFolder = this.gui.addFolder('撮影');
@@ -319,6 +331,8 @@ export class Editor {
   _applyTabPreview(name) {
     if (!this.visible || this._building) return; // build 時・非表示中は何もしない（_show で改めて適用）
     const screen = SCREEN_TABS[name];
+    // 飲料の個別調整（クリック選択）は待機プレビュー中だけ有効化する
+    this.bottleEditor?.setActive(screen === 'select');
     // 生成カメラのギズモ/パスは生成ルックタブのときだけ表示（画面プレビューには無関係なので隠す）
     const wantPath = !screen;
     if (this._pathActive !== wantPath) {
@@ -345,6 +359,7 @@ export class Editor {
   rebuild() {
     const wasVisible = this.visible;
     this.screenPreview.hide();
+    this.bottleEditor.dispose();
     this.timeline.dispose();
     this.soundEditor.dispose();
     this.pathEditor.dispose();
@@ -382,6 +397,7 @@ export class Editor {
     this.gui.hide();
     this.timeline.close();
     this.screenPreview.hide();
+    this.bottleEditor.setActive(false);
     this.pathEditor.setActive(false);
     document.body.classList.remove('editor-active');
   }
@@ -442,6 +458,7 @@ export class Editor {
     this.gui.controllersRecursive().forEach((c) => c.updateDisplay());
     this.pathEditor.rebuild();
     if (this.ctx.manager.is('select')) this.ctx.bottleRack.applyLayout?.();
+    this.bottleEditor.refresh(); // 個別オーバーライドの値変化を編集フォルダ・ボックスへ反映
     // 環境（fog/ガラス）もスナップショットへ追従させる（updateDisplay だけでは scene に反映されない）
     const sc = this.ctx.choreo.data.scene;
     if (sc) {
@@ -458,6 +475,7 @@ export class Editor {
   dispose() {
     window.removeEventListener('keydown', this._onKeyDown);
     clearTimeout(this._commitTimer);
+    this.bottleEditor.dispose();
     this.screenPreview.dispose();
     this.timeline.dispose();
     this.soundEditor.dispose();

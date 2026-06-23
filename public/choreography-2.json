@@ -2,11 +2,63 @@
   "version": 2,
   "select": {
     "rack": {
-      "spacing": 0.41,
-      "y": -0.37,
-      "z": 0.79,
+      "spacing": 0.34,
+      "y": -0.45,
+      "z": 1.65,
       "idleSwayAmp": 0.018,
-      "idleSwaySpeed": 0.9
+      "idleSwaySpeed": 0.9,
+      "overrides": {
+        "sprite": {
+          "scale": 0.85,
+          "baselineY": -0.03,
+          "marginRight": 0.04
+        },
+        "ilohas": {
+          "scale": 1,
+          "baselineY": 0,
+          "marginRight": 0.02
+        },
+        "aquarius": {
+          "scale": 1,
+          "baselineY": 0,
+          "marginRight": 0.02
+        },
+        "yakan-no-mugicha": {
+          "scale": 1.03,
+          "baselineY": 0,
+          "marginRight": 0.04
+        },
+        "ayataka": {
+          "scale": 1,
+          "baselineY": 0,
+          "marginRight": 0
+        },
+        "georgia": {
+          "scale": 0.92,
+          "baselineY": 0,
+          "marginRight": 0
+        },
+        "coca-cola-zero": {
+          "scale": 1.08,
+          "baselineY": -0.05,
+          "marginRight": 0.01
+        },
+        "coca-cola": {
+          "scale": 1.08,
+          "baselineY": -0.06,
+          "marginRight": 0
+        },
+        "soken-bicha": {
+          "scale": 1,
+          "baselineY": 0,
+          "marginRight": 0
+        },
+        "toreta": {
+          "scale": 1,
+          "baselineY": 0,
+          "marginRight": 0
+        }
+      }
     },
     "sink": {
       "duration": 1.5,
@@ -37,6 +89,13 @@
       "fov": 42,
       "driftAmp": 0.06,
       "driftSpeed": 0.25
+    },
+    "highlight": {
+      "scale": 1.2,
+      "dimOpacity": 0.8,
+      "duration": 0.4,
+      "ease": "power2.out",
+      "hold": 0.25
     }
   },
   "shoot": {

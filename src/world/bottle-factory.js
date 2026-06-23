@@ -110,8 +110,9 @@ export async function createBottlePlane(brand) {
 
     const img = tex.image;
     const aspect = img.width > 0 && img.height > 0 ? img.width / img.height : 1;
-    // Sprite だけ元画像のボトルが大きく写っており、他と高さが揃わないので 0.85 倍に縮める
-    const height = TARGET_HEIGHT * (HEIGHT_SCALE[brand.slug] ?? 1);
+    // 画像板は常に標準高さで生成し、ブランドごとのサイズ差は BottleRack が
+    // choreo.data.select.rack.overrides[slug].scale で個別に補正する（エディタで調整可能）。
+    const height = TARGET_HEIGHT;
     const width = height * aspect;
 
     const geo = new THREE.PlaneGeometry(width, height);
@@ -157,11 +158,6 @@ async function loadAlphaMap(imgUrl) {
 // GLB は出所によって原点・サイズがまちまちなので、
 // 共通規約（原点=底中心、高さ TARGET_HEIGHT）に揃える
 const TARGET_HEIGHT = 0.8;
-
-// 商品画像ごとのボトルの写り方の差を吸収する、ブランド別の高さ補正（未指定は 1）
-const HEIGHT_SCALE = {
-  sprite: 0.85,
-};
 
 function normalizeGlbModel(model) {
   const box = new THREE.Box3().setFromObject(model);

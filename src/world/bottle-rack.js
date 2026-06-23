@@ -20,10 +20,8 @@ export class BottleRack {
 
   async init(scene) {
     const cfg = this.choreo.data.select.rack;
-    const n = this.brands.list.length;
-    const totalWidth = cfg.spacing * (n - 1);
-
     const created = await Promise.all(this.brands.list.map((b) => createBottlePlane(b)));
+    const baseXs = this._computeBaseXs();
 
     created.forEach((model, i) => {
       const brand = this.brands.list[i];
@@ -44,30 +42,69 @@ export class BottleRack {
         }
       });
 
-      const baseX = -totalWidth / 2 + i * cfg.spacing;
+      const baseX = baseXs[i];
       root.position.set(baseX, 0, 0);
+      // クリック選択（エディタの個別調整）で slug を辿れるよう root に持たせる
+      root.userData.slug = brand.slug;
       this.group.add(root);
-      this.bottles.set(brand.slug, { root, spin, baseX, index: i, mats });
+      // model は createBottlePlane の返す板グループ。サイズ・ベースラインの
+      // 個別オーバーライドはこの model に効かせる（spin は選択強調アニメ専用なので分離）
+      this.bottles.set(brand.slug, { root, spin, model, baseX, index: i, mats });
     });
 
     this.group.position.set(0, cfg.y, cfg.z);
+    this.applyOverrides();
     scene.add(this.group);
+  }
+
+  /**
+   * 飲料ごとのサイズ・ベースラインのオーバーライドを各 model へ反映する。
+   * choreo.data.select.rack.overrides[slug] = { scale, baselineY }（未指定は等倍・0）。
+   * spin の選択強調 scale とは独立に効くよう、内側の model に適用する。
+   */
+  applyOverrides() {
+    const overrides = this.choreo.data.select.rack.overrides || {};
+    for (const [slug, entry] of this.bottles) {
+      const o = overrides[slug] || {};
+      entry.model.scale.setScalar(typeof o.scale === 'number' ? o.scale : 1);
+      entry.model.position.y = typeof o.baselineY === 'number' ? o.baselineY : 0;
+    }
+  }
+
+  /**
+   * 各ボトルの基準X座標を index 順で算出する。基本は spacing 等間隔だが、
+   * overrides[slug].marginRight があればそのボトルの右側に隙間を足し、
+   * 後続のボトルを右へ押し出す（累積）。全体は中央寄せに正規化する。
+   * marginRight が全て 0 のときは従来の -totalWidth/2 + i*spacing と一致する。
+   */
+  _computeBaseXs() {
+    const cfg = this.choreo.data.select.rack;
+    const overrides = cfg.overrides || {};
+    const xs = [];
+    let cursor = 0;
+    this.brands.list.forEach((b, i) => {
+      xs.push(cursor);
+      const mr = overrides[b.slug]?.marginRight;
+      cursor += cfg.spacing + (typeof mr === 'number' ? mr : 0);
+    });
+    const totalWidth = xs.length ? xs[xs.length - 1] : 0; // 末尾ボトルの位置 = ラック全幅
+    return xs.map((x) => x - totalWidth / 2);
   }
 
   setVisible(visible) {
     this.group.visible = visible;
   }
 
-  /** エディタからの spacing/y/z 変更を待機中レイアウトへ即反映 */
+  /** エディタからの spacing/y/z/marginRight 変更を待機中レイアウトへ即反映 */
   applyLayout() {
     const cfg = this.choreo.data.select.rack;
-    const n = this.brands.list.length;
-    const totalWidth = cfg.spacing * (n - 1);
+    const baseXs = this._computeBaseXs();
     for (const entry of this.bottles.values()) {
-      entry.baseX = -totalWidth / 2 + entry.index * cfg.spacing;
+      entry.baseX = baseXs[entry.index];
       entry.root.position.x = entry.baseX;
     }
     this.group.position.set(0, cfg.y, cfg.z);
+    this.applyOverrides();
   }
 
   /** main.js から world.addTickable で常駐登録される */

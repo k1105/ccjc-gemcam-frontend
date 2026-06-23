@@ -4,7 +4,7 @@
     {
       "slug": "coca-cola",
       "label": "COCA-COLA",
-      "themeColor": "#e60000",
+      "themeColor": "#f40000",
       "productImage": "public/brands/coca-cola.jpg",
       "promptFragment": "コカ・コーラ（赤いラベルの炭酸飲料）を一緒に持たせる。",
       "uiKey": "1"
@@ -12,7 +12,7 @@
     {
       "slug": "coca-cola-zero",
       "label": "COCA-COLA ZERO",
-      "themeColor": "#1a1a1a",
+      "themeColor": "#000000",
       "productImage": "public/brands/coca-cola-zero.jpg",
       "promptFragment": "コカ・コーラ ゼロ（黒いラベルの炭酸飲料）を一緒に持たせる。",
       "uiKey": "2"
@@ -20,7 +20,7 @@
     {
       "slug": "ilohas",
       "label": "ILOHAS",
-      "themeColor": "#5bb85b",
+      "themeColor": "#a3ca08",
       "productImage": "public/brands/Ilohas.png",
       "promptFragment": "い・ろ・は・す（天然水のペットボトル）を一緒に持たせる。",
       "uiKey": "3"
@@ -28,7 +28,7 @@
     {
       "slug": "aquarius",
       "label": "AQUARIUS",
-      "themeColor": "#0093d0",
+      "themeColor": "#1c24a6",
       "productImage": "public/brands/Aquarius.png",
       "promptFragment": "アクエリアス（スポーツドリンクのペットボトル）を一緒に持たせる。",
       "uiKey": "4"
@@ -36,7 +36,7 @@
     {
       "slug": "yakan-no-mugicha",
       "label": "YAKAN",
-      "themeColor": "#1d4f91",
+      "themeColor": "#22afc6",
       "productImage": "public/brands/Yakan.png",
       "promptFragment": "やかんの麦茶（麦茶のペットボトル）を一緒に持たせる。",
       "uiKey": "5"
@@ -44,7 +44,7 @@
     {
       "slug": "sprite",
       "label": "SPRITE",
-      "themeColor": "#00a04a",
+      "themeColor": "#00a14d",
       "productImage": "public/brands/Sprite.png",
       "promptFragment": "スプライト（緑のラベルの炭酸飲料）を一緒に持たせる。",
       "uiKey": "6"
@@ -52,7 +52,7 @@
     {
       "slug": "ayataka",
       "label": "AYATAKA",
-      "themeColor": "#1f7a3d",
+      "themeColor": "#d1c419",
       "productImage": "public/brands/Ayataka.png",
       "promptFragment": "綾鷹（緑茶のペットボトル）を一緒に持たせる。",
       "uiKey": "7"
@@ -60,7 +60,7 @@
     {
       "slug": "georgia",
       "label": "GEORGIA THE BLACK",
-      "themeColor": "#2b2b2b",
+      "themeColor": "#430f0b",
       "productImage": "public/brands/Georgia.png",
       "promptFragment": "ジョージア ザ・ブラック（黒いボトルのブラックコーヒー）を一緒に持たせる。",
       "uiKey": "8"
@@ -68,7 +68,7 @@
     {
       "slug": "soken-bicha",
       "label": "SOKENBICHA BEAUTEA",
-      "themeColor": "#8a6d3b",
+      "themeColor": "#3fbcb1",
       "productImage": "public/brands/SKB.png",
       "promptFragment": "爽健美茶（ブレンド茶のペットボトル）を一緒に持たせる。",
       "uiKey": "9"
@@ -76,7 +76,7 @@
     {
       "slug": "toreta",
       "label": "TORETA",
-      "themeColor": "#f08300",
+      "themeColor": "#a5dc40",
       "productImage": "public/brands/Toreta.png",
       "promptFragment": "トレタ（果実水のペットボトル）を一緒に持たせる。",
       "uiKey": "0"

@@ -1,6 +1,7 @@
 import gsap from 'gsap';
 import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag } from '../core/resources.js';
+import { playSfx } from '../core/audio.js';
 
 /**
  * RESULT: 生成画像が装飾なしで中央フェードイン。左上に Next Chapter of Growth ロゴ、
@@ -26,6 +27,7 @@ export class ResultSequence extends Sequence {
 
     overlay.hideAll();
     overlay.show('result');
+    playSfx(choreo, 'resultAppear');
 
     // --- フレームイン ---
     const r = rcfg.rect;

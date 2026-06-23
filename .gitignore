@@ -18,6 +18,8 @@ dist-ssr
 !.env.example
 *-service-account*.json
 serviceAccount*.json
+# フロントから設定した Gemini API キーの永続化先
+server/.keys.json
 
 # テスト出力（疎通確認スクリプトの生成物）
 scripts/_gemini-test-output.*

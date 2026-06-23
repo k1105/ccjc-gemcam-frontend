@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { createBottlePlane } from './bottle-factory.js';
+import { playSfx } from '../core/audio.js';
 
 /**
  * 10本のボトルラインナップ。アプリ起動時に1度だけ構築し、ループをまたいで再利用する。
@@ -136,6 +137,7 @@ export class BottleRack {
         const start = i * cfg.stagger;
         tl.add(() => {
           entry.root.visible = true;
+          playSfx(this.choreo, 'bottleSlideIn'); // 各ボトルの下からのスライドインに同期
         }, start);
         tl.fromTo(entry.root.position,
           { x: entry.baseX, y: cfg.fromY },

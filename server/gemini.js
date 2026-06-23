@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 import { getBrand, resolveProductImagePath } from './brands.js';
+import { getAttemptOrder } from './api-keys.js';
 
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-image';
 
@@ -29,6 +30,13 @@ function isRetryable(err) {
   return status === 429 || (status >= 500 && status < 600);
 }
 
+// このキーでは成功しない種類のエラー（クォータ超過・認証/権限）。
+// 次のキーへフェイルオーバーする判断に使う。
+function isKeyExhausted(err) {
+  const status = err?.status;
+  return status === 429 || status === 401 || status === 403;
+}
+
 // 環境変数でプロンプト雛形を差し替え可能。{brand_label} と {brand_fragment} を展開する。
 const DEFAULT_PROMPT_TEMPLATE = [
   '参照写真に写っている人物（複数人の場合は全員）を、4頭身にデフォルメした可愛い3DCGキャラクターに変換してください。',
@@ -38,14 +46,15 @@ const DEFAULT_PROMPT_TEMPLATE = [
   'ブランド: {brand_label}',
 ].join('\n');
 
-let _client = null;
-function client() {
-  if (!_client) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY が未設定です');
-    _client = new GoogleGenAI({ apiKey });
+// キーごとにクライアントを使い回す（毎回 new するとコネクション再確立で遅くなるため）。
+const _clients = new Map();
+function clientFor(apiKey) {
+  let c = _clients.get(apiKey);
+  if (!c) {
+    c = new GoogleGenAI({ apiKey });
+    _clients.set(apiKey, c);
   }
-  return _client;
+  return c;
 }
 
 function mimeFromPath(p) {
@@ -90,41 +99,71 @@ export async function generateToyImage(brandSlug, selfieBase64, selfieMime = 'im
     }
   }
 
-  let response;
-  for (let attempt = 1; ; attempt++) {
-    const t0 = Date.now();
-    try {
-      response = await client().models.generateContent({
-        model: MODEL,
-        contents,
-        config: {
-          httpOptions: { timeout: TIMEOUT_MS },
-          responseModalities: ['TEXT', 'IMAGE'],
-          // 結果画面は正方形前提のため出力をAPI側で固定する
-          responseFormat: { image: { aspectRatio: process.env.GEMINI_ASPECT_RATIO || '1:1' } },
-        },
-      });
-      break;
-    } catch (err) {
-      const elapsed = Date.now() - t0;
-      if (attempt >= MAX_ATTEMPTS || !isRetryable(err)) throw err;
-      console.warn(
-        `[gemini] attempt ${attempt}/${MAX_ATTEMPTS} failed after ${elapsed}ms (${err?.cause?.code ?? err?.status ?? err.message}) — retrying`
-      );
+  const requestConfig = {
+    model: MODEL,
+    contents,
+    config: {
+      httpOptions: { timeout: TIMEOUT_MS },
+      responseModalities: ['TEXT', 'IMAGE'],
+      // 結果画面は正方形前提のため出力をAPI側で固定する
+      responseFormat: { image: { aspectRatio: process.env.GEMINI_ASPECT_RATIO || '1:1' } },
+    },
+  };
+
+  // 試行するキーの順序（ラウンドロビンで開始位置が決まる）。
+  const keys = getAttemptOrder();
+  if (keys.length === 0) {
+    throw new Error('GEMINI_API_KEY が未設定です（フロントの設定パネル Ctrl+K から設定してください）');
+  }
+
+  let lastErr;
+  for (let k = 0; k < keys.length; k++) {
+    const apiKey = keys[k];
+    const cli = clientFor(apiKey);
+    const keyLabel = `key ${k + 1}/${keys.length}`;
+
+    // 同一キー内では一時的なネットワーク断のみ MAX_ATTEMPTS まで再試行する。
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const t0 = Date.now();
+      try {
+        const response = await cli.models.generateContent(requestConfig);
+        const parts = response?.candidates?.[0]?.content?.parts || [];
+        for (const part of parts) {
+          if (part.inlineData?.data) {
+            return {
+              buffer: Buffer.from(part.inlineData.data, 'base64'),
+              mimeType: part.inlineData.mimeType || 'image/png',
+            };
+          }
+        }
+        // 画像が返らなかった場合はテキスト（拒否理由など）を拾ってエラーにする。
+        // キーを替えても変わらないので即エラー。
+        const textPart = parts.find((p) => p.text)?.text;
+        throw new Error(`画像が生成されませんでした${textPart ? `: ${textPart}` : ''}`);
+      } catch (err) {
+        const elapsed = Date.now() - t0;
+        lastErr = err;
+
+        // クォータ超過・認証エラー: このキーでは無理なので次のキーへフェイルオーバー
+        if (isKeyExhausted(err)) {
+          console.warn(
+            `[gemini] ${keyLabel} がクォータ/認証エラー (${err?.status}) — 次のキーへ切替`
+          );
+          break;
+        }
+        // 一時的なネットワーク断: 同一キーで再試行
+        if (isRetryable(err) && attempt < MAX_ATTEMPTS) {
+          console.warn(
+            `[gemini] ${keyLabel} attempt ${attempt}/${MAX_ATTEMPTS} failed after ${elapsed}ms (${err?.cause?.code ?? err?.status ?? err.message}) — retrying`
+          );
+          continue;
+        }
+        // それ以外（コンテンツ拒否等）はキーを替えても無駄なので即throw
+        throw err;
+      }
     }
   }
 
-  const parts = response?.candidates?.[0]?.content?.parts || [];
-  for (const part of parts) {
-    if (part.inlineData?.data) {
-      return {
-        buffer: Buffer.from(part.inlineData.data, 'base64'),
-        mimeType: part.inlineData.mimeType || 'image/png',
-      };
-    }
-  }
-
-  // 画像が返らなかった場合はテキスト（拒否理由など）を拾ってエラーにする
-  const textPart = parts.find((p) => p.text)?.text;
-  throw new Error(`画像が生成されませんでした${textPart ? `: ${textPart}` : ''}`);
+  // 全キーがクォータ/認証で尽きた
+  throw lastErr || new Error('全てのAPIキーで生成に失敗しました');
 }

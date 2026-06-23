@@ -10,6 +10,7 @@ import { Webcam } from './core/webcam.js';
 import { ApiService } from './api.js';
 import { Overlay } from './ui/overlay.js';
 import { createEnvironment } from './world/environment.js';
+import { preloadAllSfx } from './core/audio.js';
 import { setGlassConfig } from './world/bottle-factory.js';
 import { BottleRack } from './world/bottle-rack.js';
 import { SelectSequence } from './sequences/select.js';
@@ -57,10 +58,25 @@ async function boot() {
 
   // --- グローバルキー ---
   let editor = null;
-  keyboard.addGlobalHandler((key) => {
+  let keySettings = null;
+  keyboard.addGlobalHandler((key, e) => {
     // ESC: バックヤードの強制リセット
     if (key === 'Escape') {
       manager.reset('select');
+      return true;
+    }
+    // Ctrl+K: APIキー設定パネル（lazy import — 通常運用ではチャンク未ロード）
+    if (key === 'K' && e.ctrlKey) {
+      e.preventDefault(); // ブラウザ既定（アドレスバー等）を抑止
+      if (keySettings) {
+        keySettings.toggle();
+      } else {
+        import('./ui/key-settings.js').then(({ KeySettings }) => {
+          keySettings = new KeySettings();
+          if (window.app) window.app.keySettings = keySettings; // デバッグ用フック
+          keySettings.toggle();
+        });
+      }
       return true;
     }
     // D: デバッグエディタ（lazy import — 本番ではチャンクごと未ロード）
@@ -85,6 +101,8 @@ async function boot() {
     console.error('[World] WebGL context lost — reloading');
     window.location.reload();
   });
+
+  preloadAllSfx(choreo); // 効果音サンプルを事前ロード（初回再生のもたつき防止）
 
   await manager.go('select');
   window.app = { ctx }; // デバッグ用フック

@@ -9,6 +9,10 @@ import { putImage } from './storage.js';
 import { saveLocalImage } from './local-store.js';
 import { saveGeneration } from './firestore.js';
 import { getBrand, brands } from './brands.js';
+import { loadKeys, getMaskedKeys, saveKeys, hasKeys } from './api-keys.js';
+
+// 起動時に .env / server/.keys.json からキーをロードする
+loadKeys();
 
 const app = express();
 const PORT = process.env.PORT || 8787;
@@ -29,8 +33,30 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     model: process.env.GEMINI_MODEL || 'gemini-3.1-flash-image',
     mock: process.env.MOCK_GENERATION === 'true',
+    keyCount: getMaskedKeys().count,
     brands: brands.map((b) => b.slug),
   });
+});
+
+// APIキー管理（フロントの設定パネル Shift+K から呼ぶ）。
+// GET はマスク済みのみ返し、実キーはブラウザへ出さない。
+app.get('/api/keys', (_req, res) => {
+  res.json(getMaskedKeys());
+});
+
+// POST body: { keys: [v0, v1, v2] }
+//   各値: 非空文字列=設定 / ""=クリア / null=既存保持（非破壊更新）
+app.post('/api/keys', (req, res) => {
+  try {
+    const { keys } = req.body || {};
+    if (!Array.isArray(keys)) {
+      return res.status(400).json({ error: 'keys は配列で渡してください' });
+    }
+    res.json(saveKeys(keys));
+  } catch (err) {
+    console.error('[keys] error:', err);
+    res.status(500).json({ error: err.message || 'キーの保存に失敗しました' });
+  }
 });
 
 app.post('/api/generate', async (req, res) => {
@@ -108,5 +134,7 @@ app.listen(PORT, () => {
   console.log(`[ccjc booth backend] listening on http://localhost:${PORT}`);
   if (process.env.MOCK_GENERATION === 'true') {
     console.log('[ccjc booth backend] MOCK_GENERATION=true (Gemini/Storage/Firestore を呼ばずモック応答)');
+  } else if (!hasKeys()) {
+    console.warn('[ccjc booth backend] APIキー未設定 — フロントの設定パネル(Ctrl+K)から設定してください');
   }
 });

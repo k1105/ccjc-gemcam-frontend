@@ -1,6 +1,7 @@
 import { GUI } from 'lil-gui';
 import { PathEditor } from './path-editor.js';
 import { Timeline } from './timeline.js';
+import { SoundEditor } from './sound-editor.js';
 import { ScreenPreview } from './screen-preview.js';
 import { exportChoreo, importChoreo, importGrainImage, pickSkyImage } from './io.js';
 import { setGlassConfig, refreshGlassMaterials } from '../world/bottle-factory.js';
@@ -57,12 +58,19 @@ export class Editor {
     // --- カメラパス + タイムライン + 画面プレビュー ---
     this.pathEditor = new PathEditor(this.ctx, this.gui);
     this.timeline = new Timeline(this.ctx, { pathEditor: this.pathEditor });
+    this.soundEditor = new SoundEditor(this.ctx);
     this.screenPreview = new ScreenPreview(this.ctx);
     this.pathEditor.timeline = this.timeline; // 定点ショットをプレイヘッド直後に挿入するため参照
     this.pathEditor.onChanged = () => {
       this.timeline.invalidate();
       touch();
     };
+    // GUI ⇄ Timeline の音響レイヤー相互同期
+    this.soundEditor.onChanged = () => {
+      this.timeline.invalidate(); // 音ブロックの位置/有無を再描画
+      touch();
+    };
+    this.timeline.onSoundsChanged = () => this.soundEditor.refresh();
 
     // --- 画面ごとのタブ: 各画面のプレビューを開いた状態でそのパラメータを編集 ---
     const onTuned = () => {
@@ -87,7 +95,7 @@ export class Editor {
     const generateFolder = this.gui.addFolder('生成');
     generateFolder.add({ timeline: () => this.timeline.toggle() }, 'timeline').name('🎬 Timeline 表示/非表示');
     buildGuiFromObject(generateFolder, choreo.data.generate, {
-      skipKeys: ['path', 'particles', 'times', 'lights'], // パス/時刻/ライトは PathEditor で編集
+      skipKeys: ['path', 'particles', 'times', 'lights', 'sounds'], // パス/時刻/ライト/音は専用UIで編集
       onChange: () => {
         this.timeline.invalidate();
         touch();
@@ -139,6 +147,7 @@ export class Editor {
           Camera: this.pathEditor.gui,
           Lights: this.pathEditor.lightsGui,
           Particles: particlesFolder,
+          Sound: this.soundEditor.gui,
           Env: envFolder,
         },
       },
@@ -337,6 +346,7 @@ export class Editor {
     const wasVisible = this.visible;
     this.screenPreview.hide();
     this.timeline.dispose();
+    this.soundEditor.dispose();
     this.pathEditor.dispose();
     this.gui.destroy();
     this._build();
@@ -440,6 +450,7 @@ export class Editor {
       setGlassConfig(sc.glass);
       refreshGlassMaterials(this.ctx.world.scene);
     }
+    this.soundEditor.refresh(); // sounds 配列の増減を GUI に反映
     this.timeline.invalidate();
     this.ctx.choreo.save(); // undo/redo 後の状態も保存
   }
@@ -449,6 +460,7 @@ export class Editor {
     clearTimeout(this._commitTimer);
     this.screenPreview.dispose();
     this.timeline.dispose();
+    this.soundEditor.dispose();
     this.pathEditor.dispose();
     this.gui.destroy();
     document.body.classList.remove('editor-active');

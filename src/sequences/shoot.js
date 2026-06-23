@@ -1,6 +1,7 @@
 import gsap from 'gsap';
 import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag } from '../core/resources.js';
+import { playSfx } from '../core/audio.js';
 
 /**
  * SHOOT: 3Dシーンからカメラ映像へクロスフェードでシームレスに切り替わる。
@@ -69,12 +70,14 @@ export class ShootSequence extends Sequence {
 
     for (let n = 3; n >= 1; n--) {
       overlay.showCountdownTick(n);
+      playSfx(this.ctx.choreo, 'countdown');
       await this.bag.delay(intervalMs);
       if (this.bag.disposed) return;
     }
     overlay.hideCountdown();
 
     const snapshots = this._capture(overlay);
+    playSfx(this.ctx.choreo, 'shutter');
     this.ctx.webcam.release();
     overlay.video.pause();
     overlay.video.srcObject = null;

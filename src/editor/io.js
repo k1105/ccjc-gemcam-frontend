@@ -53,6 +53,33 @@ export function pickSkyImage(onPick) {
   input.click();
 }
 
+/**
+ * 効果音ファイルをローカルから選び、data URL を onLoad(dataUrl, name) へ渡す。
+ * 粒画像と同様に choreo（JSON/localStorage）へ埋め込んで永続化する想定なので data URL。
+ * 大きいファイルは localStorage を圧迫するため、短い効果音（数十KB）向け。
+ */
+export function importAudioFile(onLoad) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'audio/*';
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const kb = Math.round((reader.result.length / 1024) * 0.75); // base64→おおよそのバイト
+      if (kb > 400) {
+        console.warn(`[Editor] 音源が大きめ (~${kb}KB)。localStorage 圧迫に注意（public/ 配置＋パス指定推奨）`);
+      }
+      onLoad(reader.result, file.name);
+      console.log('[Editor] audio loaded:', file.name, `~${kb}KB`);
+    };
+    reader.onerror = () => alert(`音源の読み込みに失敗しました: ${file.name}`);
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
 export function importChoreo(choreo, onDone) {
   const input = document.createElement('input');
   input.type = 'file';

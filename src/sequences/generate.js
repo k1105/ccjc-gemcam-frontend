@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Sequence } from '../core/sequence-manager.js';
 import { isOverlay } from '../core/camera-eval.js';
 import { OverlayScheduler } from '../core/overlay-scheduler.js';
+import { SoundScheduler } from '../core/sound-scheduler.js';
 import { TimerBag, disposeObject3D } from '../core/resources.js';
 import { PhotoParticles, makeDissolveMaterial } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
@@ -38,6 +39,15 @@ export class GenerateSequence extends Sequence {
     };
     world.addTickable(lightTick);
     this.bag.add(() => world.removeTickable(lightTick));
+
+    // 音響レイヤー（generate.sounds）を GENERATE 開始からの絶対経過秒で再生
+    this.soundScheduler = new SoundScheduler();
+    this.soundScheduler.setSounds(gcfg.sounds ?? []);
+    const soundTick = (dt) => {
+      if (!this.bag.disposed) this.soundScheduler.tick(dt);
+    };
+    world.addTickable(soundTick);
+    this.bag.add(() => world.removeTickable(soundTick));
 
     // --- カメラを最初の base ショット開始位置へ即時セット（DOM白フラッシュ中） ---
     const ph0 = gcfg.shots.find((s) => !isOverlay(s)) ?? gcfg.shots[0];

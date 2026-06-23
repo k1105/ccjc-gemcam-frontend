@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag } from '../core/resources.js';
+import { playSfx } from '../core/audio.js';
 
 /**
  * SELECT: 10本のボトルが横並び。0-9キーで選択すると
@@ -76,6 +77,7 @@ export class SelectSequence extends Sequence {
     const { bottleRack, manager, webcam } = this.ctx;
     this.selecting = true;
     console.log(`[Select] brand=${brand.slug}`);
+    playSfx(this.ctx.choreo, 'select');
     // 沈下アニメ中にWebカメラをウォームアップ → SHOOT がシームレスに始まる
     webcam.acquire().catch(() => {});
     await bottleRack.selectAndSink(brand.slug, this.bag);

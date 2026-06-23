@@ -106,6 +106,11 @@
         "fov": [50, 45],
         "endFlash": true
       }
+    ],
+    "sounds": [
+      { "id": "beep1", "start": 0.5, "sound": "beep", "freq": 660, "duration": 0.1, "volume": 0.25 },
+      { "id": "beep2", "start": 3.0, "sound": "beep", "freq": 880, "duration": 0.1, "volume": 0.25 },
+      { "id": "beep3", "start": 8.6, "sound": "beep", "freq": 1320, "duration": 0.14, "volume": 0.3 }
     ]
   },
   "result": {
@@ -142,5 +147,12 @@
       "dof": { "enabled": false, "focusDistance": 3.0, "focusRange": 4.0, "bokehScale": 2.0, "resolutionScale": 0.5 },
       "afterimage": { "enabled": false, "damp": 0.85 }
     }
+  },
+  "sfx": {
+    "select": { "sound": "sounds/select.mp3", "volume": 0.5, "enabled": true },
+    "countdown": { "sound": "beep", "freq": 1320, "duration": 0.12, "volume": 0.4, "enabled": true },
+    "shutter": { "sound": "sounds/shutter.mp3", "volume": 0.7, "enabled": true },
+    "resultAppear": { "sound": "sounds/result.mp3", "volume": 0.5, "enabled": true },
+    "bottleSlideIn": { "sound": "sounds/slide-in.mp3", "volume": 0.35, "enabled": true }
   }
 }

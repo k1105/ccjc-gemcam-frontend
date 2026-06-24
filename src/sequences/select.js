@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag } from '../core/resources.js';
 import { playSfx } from '../core/audio.js';
@@ -13,31 +12,26 @@ export class SelectSequence extends Sequence {
     const { world, overlay, keyboard, brands, choreo, bottleRack } = this.ctx;
     this.bag = new TimerBag();
     this.selecting = false;
-    this.introDone = false;
 
     overlay.hideAll();
+    overlay.showSelectGradient(choreo.data.select.gradient); // 待機画面上端の影
     this.ctx.webcam.release(); // ウォームアップ後にESC等で戻った場合のLED消灯を保証
     bottleRack.setVisible(true);
     if (payload.withReturn) bottleRack.prepareReturn();
 
     const camCfg = choreo.data.select.camera;
-    this.driftBase = new THREE.Vector3(...camCfg.pos);
 
     // リセット時・リザルト明け（画面が白い間）はカメラを即時定位置へ
     if (payload.reset || payload.withReturn) {
       if (payload.reset) bottleRack.resetInstant();
-      world.camera.position.copy(this.driftBase);
+      world.camera.position.set(...camCfg.pos);
       world.camera.fov = camCfg.fov;
       world.camera.updateProjectionMatrix();
-      this.introDone = true;
     } else {
       // 通常遷移: カメラを定位置へ滑らかに寄せる
       this.bag.to(world.camera.position, {
         x: camCfg.pos[0], y: camCfg.pos[1], z: camCfg.pos[2],
         duration: 1.2, ease: 'power2.inOut',
-        onComplete: () => {
-          this.introDone = true;
-        },
       });
       this.bag.to(world.camera, {
         fov: camCfg.fov, duration: 1.2, ease: 'power2.inOut',
@@ -45,15 +39,9 @@ export class SelectSequence extends Sequence {
       });
     }
 
-    // アイドル時のわずかなカメラドリフト + lookAt 維持
-    this.tick = (dt, elapsed) => {
+    // lookAt 維持（カメラは固定。ドリフトは廃止）
+    this.tick = () => {
       if (world.cameraLocked) return; // タイムラインプレビュー中はカメラを明け渡す
-      if (this.introDone && !this.selecting) {
-        world.camera.position.x =
-          this.driftBase.x + Math.sin(elapsed * camCfg.driftSpeed) * camCfg.driftAmp;
-        world.camera.position.y =
-          this.driftBase.y + Math.cos(elapsed * camCfg.driftSpeed * 0.8) * camCfg.driftAmp * 0.5;
-      }
       world.camera.lookAt(camCfg.look[0], camCfg.look[1], camCfg.look[2]);
     };
     world.addTickable(this.tick);
@@ -85,8 +73,9 @@ export class SelectSequence extends Sequence {
   }
 
   async exit() {
-    const { world, keyboard } = this.ctx;
+    const { world, keyboard, overlay } = this.ctx;
     keyboard.clearHandler();
+    overlay.hideSelectGradient();
     if (this.tick) world.removeTickable(this.tick);
     this.bag.disposeAll();
   }

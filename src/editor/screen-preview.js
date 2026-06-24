@@ -26,6 +26,7 @@ export class ScreenPreview {
     this._stopAnim();
     const { overlay, world } = this.ctx;
     overlay.hideAll();
+    overlay.hideSelectGradient();
     overlay.hideCountdown();
     this._clearProps();
 
@@ -44,6 +45,7 @@ export class ScreenPreview {
     const { overlay, world } = this.ctx;
     world.removeTickable(this._tick);
     overlay.hideAll();
+    overlay.hideSelectGradient();
     overlay.hideCountdown();
     this._clearProps();
     this.active = null;
@@ -58,8 +60,9 @@ export class ScreenPreview {
   // ---- 静止プレビュー ----
 
   _showSelect() {
-    // 待機＝オーバーレイ無し。ボトルラックを見せるだけ（カメラドリフトは SELECT tick が継続）
+    // 待機＝オーバーレイ無し。ボトルラックと上端グラデーションを見せる（カメラドリフトは SELECT tick が継続）
     this.ctx.bottleRack.setVisible(true);
+    this.ctx.overlay.showSelectGradient(this.ctx.choreo.data.select.gradient);
   }
 
   _showShoot() {

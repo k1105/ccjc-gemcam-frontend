@@ -39,6 +39,17 @@ body.editor-active * {
   z-index: 0;
 }
 
+/* --- 待機画面の上端グラデーション（影）---
+   height / background は choreo.select.gradient から JS で動的に設定する */
+#select-gradient {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 5; /* canvas(0) の上、screen(10) の下 */
+  pointer-events: none;
+}
+
 /* --- generic fullscreen screen overlay --- */
 .screen {
   position: fixed;

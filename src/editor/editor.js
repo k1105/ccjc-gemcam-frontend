@@ -87,7 +87,9 @@ export class Editor {
     // overrides（飲料ごとのサイズ・ベースライン）はクリック選択UI（BottleEditor）で
     // 編集するので、汎用ツリー生成からは除外する。
     const selectFolder = this.gui.addFolder('待機');
-    buildGuiFromObject(selectFolder, choreo.data.select, { onChange: onTuned, skipKeys: ['overrides'] });
+    // gradient（上端の影）は色・不透明度・長さに最適化した専用UIで編集する
+    buildGuiFromObject(selectFolder, choreo.data.select, { onChange: onTuned, skipKeys: ['overrides', 'gradient'] });
+    this._buildGradientFolder(selectFolder, onTuned);
 
     // 飲料 個別調整: 待機プレビュー中にキャンバスのボトルをクリックして編集
     this.bottleEditor = new BottleEditor(this.ctx, {
@@ -166,6 +168,27 @@ export class Editor {
       リザルト: resultFolder,
     });
     this._building = false;
+  }
+
+  /**
+   * 待機画面 上端グラデーション（影）の編集フォルダ。color/不透明度/長さに合わせた
+   * レンジで lil-gui にバインドし、変更を待機プレビューへライブ反映する。
+   */
+  _buildGradientFolder(parent, touch) {
+    const { choreo, overlay, manager } = this.ctx;
+    const g = choreo.data.select.gradient;
+    // 待機プレビュー中なら即反映（show=enabled トグルにも追従）
+    const apply = () => {
+      if (manager.is('select')) overlay.showSelectGradient(g);
+      touch();
+    };
+    const folder = parent.addFolder('gradient（上端の影）');
+    folder.add(g, 'enabled').name('表示').onChange(apply);
+    folder.addColor(g, 'color').name('色').onChange(apply);
+    folder.add(g, 'startOpacity', 0, 1, 0.01).name('開始の不透明度（上端）').onChange(apply);
+    folder.add(g, 'endOpacity', 0, 1, 0.01).name('終了の不透明度（下端）').onChange(apply);
+    folder.add(g, 'length', 0, 100, 1).name('影の長さ（画面高さ%）').onChange(apply);
+    folder.close();
   }
 
   /**
@@ -457,7 +480,10 @@ export class Editor {
     // lil-gui コントローラ・PathEditor・Timeline を再表示（バインドは維持）
     this.gui.controllersRecursive().forEach((c) => c.updateDisplay());
     this.pathEditor.rebuild();
-    if (this.ctx.manager.is('select')) this.ctx.bottleRack.applyLayout?.();
+    if (this.ctx.manager.is('select')) {
+      this.ctx.bottleRack.applyLayout?.();
+      this.ctx.overlay.showSelectGradient(this.ctx.choreo.data.select.gradient);
+    }
     this.bottleEditor.refresh(); // 個別オーバーライドの値変化を編集フォルダ・ボックスへ反映
     // 環境（fog/ガラス）もスナップショットへ追従させる（updateDisplay だけでは scene に反映されない）
     const sc = this.ctx.choreo.data.scene;

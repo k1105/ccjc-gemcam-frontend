@@ -86,9 +86,7 @@
         0,
         0
       ],
-      "fov": 42,
-      "driftAmp": 0.06,
-      "driftSpeed": 0.25
+      "fov": 42
     },
     "highlight": {
       "scale": 1.2,

@@ -7,6 +7,7 @@ import { TimerBag, disposeObject3D } from '../core/resources.js';
 import { PhotoParticles, makeDissolveMaterial } from '../world/photo-particles.js';
 import { createBottle } from '../world/bottle-factory.js';
 import { LightRig } from '../core/light-rig.js';
+import { crushNearWhiteUrl } from '../core/near-white.js';
 
 /**
  * GENERATE: 撮影写真が3D平面としてカメラから遠ざかり、パーティクルに分解されて
@@ -199,8 +200,12 @@ export class GenerateSequence extends Sequence {
       if (this.bag.disposed) return;
     }
 
-    // リザルト画像を事前ロード（フェードインのポップ防止）
-    await preloadImage(result.imageUrl).catch(() => {});
+    // リザルト表示用の画像をここ（遷移前・白画面に入る前）で完成させておく。
+    // near-white 潰し（fetch + 全ピクセル走査 + PNG 再エンコード）は重く、これを
+    // RESULT 側でやると白フラッシュ中に走って「結果が出ない待ち時間」に見える。
+    // ここで CORS 付きで取得・処理した data URL を payload で渡し、RESULT は src に
+    // 入れるだけにする（再 fetch / 再処理ゼロ）。失敗時は元 URL がそのまま返る。
+    const displaySrc = await crushNearWhiteUrl(result.imageUrl);
     if (this.bag.disposed) return;
 
     // 待機ロゴを表示していた場合はフェードアウトしてから遷移（パッと消えないように）。
@@ -212,7 +217,7 @@ export class GenerateSequence extends Sequence {
       hold: 0.15,
       outDur: 0.8,
       onWhite: () => {
-        manager.go('result', { result, brand: this.brand });
+        manager.go('result', { result, brand: this.brand, displaySrc });
       },
     });
   }
@@ -296,13 +301,4 @@ export class GenerateSequence extends Sequence {
       this.bottle = null;
     }
   }
-}
-
-function preloadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => (img.decode ? img.decode().then(resolve, resolve) : resolve());
-    img.onerror = reject;
-    img.src = url;
-  });
 }

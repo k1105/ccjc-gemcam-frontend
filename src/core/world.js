@@ -58,6 +58,7 @@ export class World {
     // ポストプロセス（setupPostFX で有効化）。無効時は null のまま renderer 直描画。
     this.composer = null;
     this.dof = null;
+    this.dofPass = null; // DOF を含む EffectPass（enabled トグルで一時無効化する）
     this.afterimage = null;
     // DOF のフォーカス対象（world 座標 Vector3 の参照 / null=固定距離）。
     // シーケンスが setFocusTarget で主役（ボトル等）を指す。
@@ -102,7 +103,8 @@ export class World {
         });
         // 既に focusTarget があれば追従、無ければ focusDistance 固定
         this.dof.target = this.focusTarget;
-        this.composer.addPass(new EffectPass(this.camera, this.dof));
+        this.dofPass = new EffectPass(this.camera, this.dof);
+        this.composer.addPass(this.dofPass);
       }
       // composer 経由ではキャンバスの MSAA が効かないため SMAA で輪郭を整える。
       // SMAA は convolution 系なので DOF とは別 EffectPass に分ける。
@@ -120,6 +122,7 @@ export class World {
       this.composer?.dispose();
       this.composer = null;
       this.dof = null;
+      this.dofPass = null;
       this.afterimage = null;
     }
   }
@@ -132,6 +135,14 @@ export class World {
   setFocusTarget(vec3OrNull) {
     this.focusTarget = vec3OrNull ?? null;
     if (this.dof) this.dof.target = this.focusTarget;
+  }
+
+  /**
+   * 被写界深度（DOF）パスの有効/無効を切り替える。postfx 無効時は no-op。
+   * エディタの俯瞰（Free）ビューなど、演出カメラ以外を映す間だけ切るために使う。
+   */
+  setDofEnabled(on) {
+    if (this.dofPass) this.dofPass.enabled = !!on;
   }
 
   addTickable(fn) {

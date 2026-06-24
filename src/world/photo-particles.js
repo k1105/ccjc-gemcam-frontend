@@ -164,7 +164,11 @@ export class PhotoParticles {
         uNoiseFreq: { value: this.cfg.noiseFreq },
         uHelixTheta0: { value: s.theta0 },
         uHelixY0: { value: s.y0 },
-        uHelixRadius: { value: this.cfg.helixRadius },
+        // 螺旋の半径は入射時(start)→下降しきった頃(end)へ helixRadiusShrinkDur 秒で
+        // 徐々に縮む（じょうご状に締まる）。旧 helixRadius は start のフォールバック。
+        uHelixStartRadius: { value: this._helixStartRadius() },
+        uHelixEndRadius: { value: this._helixEndRadius() },
+        uHelixRadiusShrinkDur: { value: this.cfg.helixRadiusShrinkDur ?? 3 },
         uHelixSpeed: { value: this.cfg.helixSpeed },
         uHelixBobAmp: { value: this.cfg.helixBobAmp },
         uHelixBobFreq: { value: this.cfg.helixBobFreq },
@@ -210,19 +214,21 @@ export class PhotoParticles {
     const sp = Math.sign(cfg.helixSpeed) || 1;
     const theta0 = Math.atan2(-approach.x * sp, approach.z * sp);
     const y0 = center.y + cfg.helixEntryY;
+    // 入口（s2=0）は螺旋の開始半径。ここから徐々に終了半径へ縮んでいく。
+    const r0 = this._helixStartRadius();
     const p3 = new THREE.Vector3(
-      center.x + Math.cos(theta0) * cfg.helixRadius,
+      center.x + Math.cos(theta0) * r0,
       y0,
-      center.z + Math.sin(theta0) * cfg.helixRadius
+      center.z + Math.sin(theta0) * r0
     );
 
     // ヘリックス入口での接線（s2=0 の helixPos 微分方向）。彗星がこの向きで p3 に
     // 到達するようベジェ終端ハンドル p2 を接線の逆向きに置くと、半径方向から「突っ込む」
     // のではなく螺旋に接するように入射できる（C1 連続）。
     const entryTan = new THREE.Vector3(
-      -Math.sin(theta0) * cfg.helixSpeed * cfg.helixRadius,
+      -Math.sin(theta0) * cfg.helixSpeed * r0,
       -cfg.helixDescent + cfg.helixBobFreq * cfg.helixBobAmp,
-      Math.cos(theta0) * cfg.helixSpeed * cfg.helixRadius
+      Math.cos(theta0) * cfg.helixSpeed * r0
     ).normalize();
     const handle = p3.distanceTo(p0) * (cfg.helixEntryTangent ?? 0.4);
 
@@ -248,11 +254,29 @@ export class PhotoParticles {
     const s = this._stream;
     const ang = s.theta0 + s2 * cfg.helixSpeed;
     const drop = Math.min(s2 * cfg.helixDescent, cfg.helixDrop);
+    const r = this._helixRadiusAt(s2);
     return out.set(
-      this._target.x + Math.cos(ang) * cfg.helixRadius,
+      this._target.x + Math.cos(ang) * r,
       s.y0 - drop + Math.sin(s2 * cfg.helixBobFreq) * cfg.helixBobAmp,
-      this._target.z + Math.sin(ang) * cfg.helixRadius
+      this._target.z + Math.sin(ang) * r
     );
+  }
+
+  /** 螺旋の開始半径（旧 helixRadius を後方互換のフォールバックに使う） */
+  _helixStartRadius() {
+    return this.cfg.helixStartRadius ?? this.cfg.helixRadius ?? 0.55;
+  }
+
+  /** 螺旋の終了半径（未指定なら開始半径＝半径一定） */
+  _helixEndRadius() {
+    return this.cfg.helixEndRadius ?? this._helixStartRadius();
+  }
+
+  /** s2（螺旋入射からの経過秒）での半径。start→end へ徐々に縮む。シェーダと同一式 */
+  _helixRadiusAt(s2) {
+    const dur = this.cfg.helixRadiusShrinkDur ?? 3;
+    const k = dur > 0 ? Math.min(Math.max(s2 / dur, 0), 1) : 1;
+    return this._helixStartRadius() + (this._helixEndRadius() - this._helixStartRadius()) * k;
   }
 
   /** world tick に登録して時間を進める */
@@ -547,7 +571,9 @@ uniform float uNoiseAmp;
 uniform float uNoiseFreq;
 uniform float uHelixTheta0;
 uniform float uHelixY0;
-uniform float uHelixRadius;
+uniform float uHelixStartRadius;
+uniform float uHelixEndRadius;
+uniform float uHelixRadiusShrinkDur;
 uniform float uHelixSpeed;
 uniform float uHelixBobAmp;
 uniform float uHelixBobFreq;
@@ -572,10 +598,13 @@ const float TAU = 6.28318530718;
 vec3 helixPos(float s2) {
   float ang = uHelixTheta0 + s2 * uHelixSpeed;
   float drop = min(s2 * uHelixDescent, uHelixDrop);
+  // 入射(start)→下降しきり(end)へ向け半径を徐々に縮める（じょうご状）
+  float rk = (uHelixRadiusShrinkDur > 0.0) ? clamp(s2 / uHelixRadiusShrinkDur, 0.0, 1.0) : 1.0;
+  float r = mix(uHelixStartRadius, uHelixEndRadius, rk);
   return vec3(
-    uTarget.x + cos(ang) * uHelixRadius,
+    uTarget.x + cos(ang) * r,
     uHelixY0 - drop + sin(s2 * uHelixBobFreq) * uHelixBobAmp,
-    uTarget.z + sin(ang) * uHelixRadius
+    uTarget.z + sin(ang) * r
   );
 }
 

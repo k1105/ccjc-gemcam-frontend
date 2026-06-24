@@ -2,9 +2,9 @@
   "version": 2,
   "select": {
     "rack": {
-      "spacing": 0.34,
-      "y": -0.45,
-      "z": 1.65,
+      "spacing": 0.27,
+      "y": -0.75,
+      "z": 2.2,
       "idleSwayAmp": 0.018,
       "idleSwaySpeed": 0.9,
       "overrides": {
@@ -40,12 +40,12 @@
         },
         "coca-cola-zero": {
           "scale": 1.08,
-          "baselineY": -0.05,
+          "baselineY": -0.04,
           "marginRight": 0.01
         },
         "coca-cola": {
           "scale": 1.08,
-          "baselineY": -0.06,
+          "baselineY": -0.04,
           "marginRight": 0
         },
         "soken-bicha": {
@@ -94,6 +94,32 @@
       "duration": 0.4,
       "ease": "power2.out",
       "hold": 0.25
+    },
+    "transition": {
+      "scale": 1.2,
+      "scaleDuration": 1,
+      "scaleEase": "power2.out",
+      "hold": 0.45,
+      "sideX": 3.2,
+      "sideDuration": 0.55,
+      "sideEase": "power2.in",
+      "sideStagger": 0.04,
+      "band": {
+        "riseDuration": 0.7,
+        "riseEase": "power2.out",
+        "holdFull": 0.12,
+        "maxHold": 0.8,
+        "flowDuration": 0.7,
+        "flowEase": "power2.in"
+      }
+    },
+    "gradient": {
+      "enabled": true,
+      "color": "#adadad",
+      "startOpacity": 1,
+      "endOpacity": 0.31,
+      "length": 28,
+      "blur": 17
     }
   },
   "shoot": {
@@ -108,10 +134,9 @@
       ],
       "size": 0.018,
       "sizeGrow": 6,
-      "sizeGrowBias": 6,
       "surviveRatio": 0.22,
       "rippleLead": 1.4,
-      "rippleAmp": 0.16,
+      "rippleAmp": 0,
       "rippleFreq": [
         9,
         6
@@ -119,7 +144,7 @@
       "rippleSpeed": 2.4,
       "dissolveDelaySpread": 4.96,
       "headLead": -0.1,
-      "flightDuration": 4.5,
+      "flightDuration": 7.5,
       "lateralRadius": 0.61,
       "twist": 3,
       "noiseAmp": 0.06,
@@ -144,17 +169,22 @@
       "helixDrop": 0.91,
       "helixFade": 17.01,
       "useImageColor": false,
-      "brightMin": -0.04,
-      "brightMax": 0.83,
-      "brightRandom": 0.32,
-      "grainImage": "/particle.png",
+      "brightMin": 0.12,
+      "brightMax": 1.92,
+      "brightRandom": 0.12,
+      "grainImage": "",
       "colorFadeStart": 1.4,
       "colorFadeEnd": 3.5,
       "swapSizeBoost": 0.8,
       "swapSizeBoostDur": 1.5,
       "dissolveNoiseScale": 6,
       "dissolveEdge": 0.3,
-      "swapPixelRadius": 30
+      "swapPixelRadius": 30,
+      "themeColor": "#ff0a0a",
+      "sizeGrowBias": 11.53,
+      "helixStartRadius": 0.55,
+      "helixEndRadius": 0.18,
+      "helixRadiusShrinkDur": 3
     },
     "photoDistance": 2.2,
     "bottlePos": [
@@ -200,9 +230,9 @@
         "path": [
           {
             "p": [
-              4.208,
-              1.61,
-              -2.933
+              0,
+              0.5,
+              2.5
             ],
             "look": [
               0,
@@ -242,8 +272,8 @@
       {
         "id": "heroFollow",
         "type": "path",
-        "duration": 5.6,
-        "ease": "none",
+        "duration": 8.6,
+        "ease": "power2.inOut",
         "path": [
           [
             0.5,
@@ -319,12 +349,12 @@
         "type": "loop",
         "relativeTo": "bottle",
         "closed": true,
-        "loopDuration": 6,
+        "loopDuration": 9.2,
         "exitPoints": 12,
         "minHoldProgress": 0,
         "lookAt": {
           "mode": "target",
-          "target": "heroParticle",
+          "target": "bottle",
           "lerp": 0.2
         },
         "path": [
@@ -378,14 +408,15 @@
           0.7142857142857143,
           0.8571428571428571,
           1
-        ]
+        ],
+        "ease": "power2.inOut"
       },
       {
         "id": "pathcut-5",
         "type": "path",
-        "start": 9.083,
+        "start": 13.967,
         "duration": 1.8,
-        "ease": "power2.inOut",
+        "ease": "none",
         "path": [
           [
             10.105,
@@ -412,8 +443,8 @@
       {
         "id": "pathcut-4",
         "type": "path",
-        "start": 14.033,
-        "duration": 1.8,
+        "start": 17.667,
+        "duration": 0.999999999999999,
         "ease": "power2.inOut",
         "path": [
           {
@@ -453,7 +484,7 @@
       {
         "id": "pathcut-3",
         "type": "path",
-        "start": 11.983,
+        "start": 15.733,
         "duration": 2,
         "ease": "power2.inOut",
         "path": [
@@ -529,54 +560,18 @@
     ],
     "sounds": [
       {
-        "id": "beep1",
-        "start": 0.5,
-        "sound": "beep",
-        "freq": 660,
-        "duration": 0.1,
-        "volume": 0.25,
-        "enabled": true
-      },
-      {
         "id": "beep2",
-        "start": 3,
-        "sound": "beep",
+        "start": 4.483,
+        "sound": "sounds/soda-pour.mp3",
         "freq": 880,
         "duration": 0.1,
         "volume": 0.25,
-        "enabled": true
-      },
-      {
-        "id": "beep3",
-        "start": 8.6,
-        "sound": "beep",
-        "freq": 1320,
-        "duration": 0.14,
-        "volume": 0.3,
-        "enabled": true
-      },
-      {
-        "id": "beep4",
-        "start": 5.821,
-        "sound": "beep",
-        "freq": 880,
-        "duration": 0.12,
-        "volume": 0.3,
         "enabled": true
       },
       {
         "id": "beep5",
         "start": 7.1,
-        "sound": "beep",
-        "freq": 880,
-        "duration": 0.12,
-        "volume": 0.3,
-        "enabled": true
-      },
-      {
-        "id": "beep6",
-        "start": 11.276,
-        "sound": "beep",
+        "sound": "sounds/whsh.mp3",
         "freq": 880,
         "duration": 0.12,
         "volume": 0.3,
@@ -584,8 +579,35 @@
       },
       {
         "id": "beep7",
-        "start": 15.717,
-        "sound": "beep",
+        "start": 20.733,
+        "sound": "sounds/tansan07.mp3",
+        "freq": 880,
+        "duration": 0.12,
+        "volume": 0.3,
+        "enabled": true
+      },
+      {
+        "id": "beep1",
+        "start": 9.733,
+        "sound": "sounds/tansan02.mp3",
+        "freq": 880,
+        "duration": 0.12,
+        "volume": 0.3,
+        "enabled": true
+      },
+      {
+        "id": "beep3",
+        "start": 15.35,
+        "sound": "sounds/tansan01.mp3",
+        "freq": 880,
+        "duration": 0.12,
+        "volume": 0.3,
+        "enabled": true
+      },
+      {
+        "id": "beep4",
+        "start": 15.783,
+        "sound": "sounds/whsh.mp3",
         "freq": 880,
         "duration": 0.12,
         "volume": 0.3,

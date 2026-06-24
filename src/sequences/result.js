@@ -13,14 +13,16 @@ import { crushNearWhiteUrl } from '../core/near-white.js';
 export class ResultSequence extends Sequence {
   async enter(payload) {
     const { overlay, choreo } = this.ctx;
-    const { result, brand } = payload;
+    const { result, brand, displaySrc } = payload;
     this.bag = new TimerBag();
     const rcfg = choreo.data.result;
     const els = overlay.result;
 
-    // 生成画像の near-white を完全な #ffffff に潰してから表示する（閾値 230 固定）。
-    // CORS 未設定等で潰しに失敗した場合は元 URL にフォールバックされる。
-    els.image.src = await crushNearWhiteUrl(result.imageUrl);
+    // 生成画像の near-white を #ffffff に潰した表示用 src。GENERATE が遷移前に
+    // 処理済みの displaySrc を渡してくるのが通常で、その場合は再 fetch / 再処理せず
+    // 即セットできる（白フラッシュ中の待ち時間を消す）。直接 RESULT に入った等で
+    // 未指定なら、ここでフォールバックとして潰し処理する（失敗時は元 URL）。
+    els.image.src = displaySrc ?? (await crushNearWhiteUrl(result.imageUrl));
     // <img> が実際に描画可能になるまで待つ（decode 完了前にフェードインを始めると
     // 画像が間に合わず空のまま表示されてしまう）。decode 非対応/失敗時は続行する。
     await this._awaitImageReady(els.image);

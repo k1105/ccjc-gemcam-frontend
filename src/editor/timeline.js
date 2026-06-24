@@ -78,13 +78,15 @@ export class Timeline {
   }
 
   async open() {
-    const {manager, world, bottleRack, brands} = this.ctx;
+    const {manager, world, bottleRack, brands, overlay} = this.ctx;
     if (this.open_) return;
     if (!manager.is("select") || manager.transitioning) {
       this._flashMessage("SELECT 待機中のみ開けます（生成中は不可）");
       return;
     }
     this.open_ = true;
+    // 背景で動いている SELECT 待機画面のグラデーションは生成プレビューに無関係なので隠す
+    overlay.hideSelectGradient();
 
     // カメラを占有（close で復元）
     this._camSnapshot = {
@@ -113,11 +115,12 @@ export class Timeline {
 
   close() {
     if (!this.open_) return;
-    const {world, manager, bottleRack} = this.ctx;
+    const {world, manager, bottleRack, overlay, choreo} = this.ctx;
     this.open_ = false;
     this.playing = false;
     window.removeEventListener("keydown", this._onKeyDown, true);
     world.removeTickable(this._tick);
+    world.setDofEnabled(true); // Free で切っていた DOF を本編へ戻す
     this._disposeFreeView();
     this.pathEditor._disposeStream?.(); // particles 破棄に合わせてストリームのハンドルも破棄
     this.stage.close();
@@ -133,6 +136,8 @@ export class Timeline {
       this._camSnapshot = null;
     }
     bottleRack.setVisible(manager.is("select"));
+    // 生成プレビュー中は隠していた待機画面グラデーションを SELECT へ戻すとき復帰
+    if (manager.is("select")) overlay.showSelectGradient(choreo.data.select.gradient);
   }
 
   /**
@@ -264,6 +269,9 @@ export class Timeline {
     this.viewMode = mode;
     this.viewBtn.textContent =
       mode === "free" ? "視点: Free(俯瞰)" : "視点: Camera";
+
+    // 俯瞰（Free）は演出カメラの視点ではないため、被写界深度を切って素のシーンを見せる。
+    world.setDofEnabled(mode !== "free");
 
     if (mode === "free") {
       this._ensureFreeView();

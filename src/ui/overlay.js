@@ -43,22 +43,53 @@ export class Overlay {
     this.hideGenerateWaitLogo();
   }
 
-  /** GENERATE 待機ロゴ（中央）をフェードインで表示する。 */
+  /**
+   * GENERATE 待機ロゴ（中央）を表示する。
+   * カメラ映像を 1.0s でホワイトアウトし、その白地の上にロゴをフェードインして
+   * からゆっくり明滅（pulse）させる。
+   */
   showGenerateWaitLogo() {
     const el = this.generateWaitLogo;
     if (!el) return;
     gsap.killTweensOf(el);
     el.classList.remove('hidden');
-    gsap.fromTo(el, { opacity: 0 }, { opacity: 1, duration: 0.4, ease: 'power2.out' });
+    // カメラ映像を 1.0s でホワイトアウト（ロゴは flash の上に出る）
+    this.setWhite(true, 1.0);
+    // フェードイン → ゆっくり明滅（sine yoyo の無限ループ）
+    gsap
+      .timeline()
+      .fromTo(el, { opacity: 0 }, { opacity: 1, duration: 0.8, ease: 'power2.out' })
+      .to(el, { opacity: 0.3, duration: 1.2, ease: 'sine.inOut', repeat: -1, yoyo: true });
   }
 
-  /** GENERATE 待機ロゴを即座に隠す。 */
+  /** GENERATE 待機ロゴを即座に隠す（ESC/リセット等の即時クリア用）。 */
   hideGenerateWaitLogo() {
     const el = this.generateWaitLogo;
     if (!el) return;
     gsap.killTweensOf(el);
     el.classList.add('hidden');
     gsap.set(el, { opacity: 0 });
+  }
+
+  /**
+   * GENERATE 待機ロゴをフェードアウトして隠す（結果遷移時にパッと消えないように）。
+   * 既に隠れている場合は即時 resolve。明滅ループは killTweensOf で止める。
+   */
+  fadeOutGenerateWaitLogo(dur = 0.5) {
+    const el = this.generateWaitLogo;
+    if (!el || el.classList.contains('hidden')) return Promise.resolve();
+    gsap.killTweensOf(el);
+    return new Promise((resolve) => {
+      gsap.to(el, {
+        opacity: 0,
+        duration: dur,
+        ease: 'power2.in',
+        onComplete: () => {
+          el.classList.add('hidden');
+          resolve();
+        },
+      });
+    });
   }
 
   /**
@@ -76,9 +107,36 @@ export class Overlay {
     const { r, g, b } = hexToRgb(cfg.color ?? '#cccccc');
     const top = cfg.startOpacity ?? 1;
     const bottom = cfg.endOpacity ?? 0;
-    el.style.height = `${cfg.length ?? 40}vh`;
-    el.style.background =
-      `linear-gradient(to bottom, rgba(${r},${g},${b},${top}) 0%, rgba(${r},${g},${b},${bottom}) 100%)`;
+    const length = cfg.length ?? 40;
+    const blur = cfg.blur ?? 0;
+    const c = (a) => `rgba(${r},${g},${b},${a})`;
+
+    if (blur > 0) {
+      // blur(σ) はカーネルが要素の外側（透明域・画面外）を拾うため、そのままだと
+      // 上端・左右の端が薄まって角が白く透ける。ガウスの広がり ≈ 3σ ぶんだけ要素を
+      // 画面外へはみ出させ、その余白を上端色のベタ塗りで「塗り足し（ブリード）」する。
+      // 端の薄まりはビューポート外に逃げるので、画面内の角は白くならない。
+      // 縦グラデーションは横方向に一様なので、左右は幅を広げるだけでベタ塗りになる。
+      const m = Math.ceil(blur * 3);
+      el.style.top = `-${m}px`;
+      el.style.left = `-${m}px`;
+      el.style.width = `calc(100% + ${2 * m}px)`;
+      // 上に m px 伸ばしたぶん高さも増やし、可視領域の影の長さ（length）を保つ。
+      el.style.height = `calc(${length}vh + ${m}px)`;
+      // 0〜m px は上端色のベタ塗り（画面外の塗り足し）、そこから下が本来のグラデーション。
+      el.style.background =
+        `linear-gradient(to bottom, ${c(top)} 0, ${c(top)} ${m}px, ${c(bottom)} 100%)`;
+      el.style.filter = `blur(${blur}px)`;
+    } else {
+      // ブラー無し: 余計なはみ出し／filter を消して既定のレイアウトへ戻す。
+      el.style.top = '0';
+      el.style.left = '0';
+      el.style.width = '100%';
+      el.style.height = `${length}vh`;
+      el.style.background =
+        `linear-gradient(to bottom, ${c(top)} 0%, ${c(bottom)} 100%)`;
+      el.style.filter = 'none';
+    }
   }
 
   /** グラデーションを設定に従って表示する（enabled:false なら表示しない） */

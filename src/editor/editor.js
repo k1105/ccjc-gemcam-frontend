@@ -188,6 +188,7 @@ export class Editor {
     folder.add(g, 'startOpacity', 0, 1, 0.01).name('開始の不透明度（上端）').onChange(apply);
     folder.add(g, 'endOpacity', 0, 1, 0.01).name('終了の不透明度（下端）').onChange(apply);
     folder.add(g, 'length', 0, 100, 1).name('影の長さ（画面高さ%）').onChange(apply);
+    folder.add(g, 'blur', 0, 100, 1).name('ブラー量（px）').onChange(apply);
     folder.close();
   }
 

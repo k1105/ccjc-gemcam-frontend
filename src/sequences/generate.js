@@ -202,12 +202,15 @@ export class GenerateSequence extends Sequence {
     await preloadImage(result.imageUrl).catch(() => {});
     if (this.bag.disposed) return;
 
+    // 待機ロゴを表示していた場合はフェードアウトしてから遷移（パッと消えないように）。
+    // 表示していなければ即時 resolve され、従来どおりカメラからのホワイトアウトになる。
+    await overlay.fadeOutGenerateWaitLogo(0.5);
+    if (this.bag.disposed) return;
     overlay.flashWhite({
       inDur: 0.12,
       hold: 0.15,
       outDur: 0.8,
       onWhite: () => {
-        overlay.hideGenerateWaitLogo();
         manager.go('result', { result, brand: this.brand });
       },
     });

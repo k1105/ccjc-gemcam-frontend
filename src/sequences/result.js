@@ -21,6 +21,11 @@ export class ResultSequence extends Sequence {
     // 生成画像の near-white を完全な #ffffff に潰してから表示する（閾値 230 固定）。
     // CORS 未設定等で潰しに失敗した場合は元 URL にフォールバックされる。
     els.image.src = await crushNearWhiteUrl(result.imageUrl);
+    // <img> が実際に描画可能になるまで待つ（decode 完了前にフェードインを始めると
+    // 画像が間に合わず空のまま表示されてしまう）。decode 非対応/失敗時は続行する。
+    await this._awaitImageReady(els.image);
+    // 待機中に exit された場合は以降のアニメーションを開始しない
+    if (this.bag.disposed) return;
     els.rect.style.backgroundColor = brand.themeColor || '#000';
 
     // 初期状態リセット（前回アウトロの y 移動も戻す）
@@ -51,6 +56,33 @@ export class ResultSequence extends Sequence {
     // 滞留→アウトロ→遷移は enter の外で進行させる
     // （enter 内で待つと manager.go が完了せず次遷移が busy 扱いになる）
     this._run(rcfg, els).catch((err) => console.error('[Result] run error', err));
+  }
+
+  /**
+   * <img> がデコード済みで描画可能になるまで待つ。
+   * decode() 対応ブラウザではそれを優先し、非対応・失敗時は onload で待機する。
+   * いずれも失敗した場合でも表示は壊さないため resolve して続行する。
+   */
+  _awaitImageReady(img) {
+    if (!img || !img.src) return Promise.resolve();
+    if (typeof img.decode === 'function') {
+      return img.decode().catch(() => this._awaitImageLoad(img));
+    }
+    return this._awaitImageLoad(img);
+  }
+
+  _awaitImageLoad(img) {
+    // 既にデコード済みで自然サイズが確定していれば即時 resolve
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        img.removeEventListener('load', done);
+        img.removeEventListener('error', done);
+        resolve();
+      };
+      img.addEventListener('load', done);
+      img.addEventListener('error', done); // 失敗時も表示は続行させる
+    });
   }
 
   async _run(rcfg, els) {

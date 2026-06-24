@@ -343,6 +343,16 @@ export class PathEditor {
     // overlay（パスカット）は start/duration で割り込み位置と尺を編集
     if (isOverlay(phase)) this._addOverlayTimingControls(this.kfFolder, phase);
 
+    // 補間（このカット全体の t 進行＝キーフレーム間の繋ぎ方）: リニア ⇄ ease-in-out
+    const easeProxy = { mode: !phase.ease || phase.ease === 'none' ? 'リニア' : 'ease-in-out' };
+    this.kfFolder
+      .add(easeProxy, 'mode', ['リニア', 'ease-in-out'])
+      .name('補間（キーフレーム間の繋ぎ）')
+      .onChange((m) => {
+        phase.ease = m === 'リニア' ? 'none' : 'power2.inOut';
+        this.onChanged?.();
+      });
+
     if (entry === '@current') {
       this.kfFolder.add({ info: '実行時カメラ位置（編集不可）' }, 'info').name('type').disable();
       return;

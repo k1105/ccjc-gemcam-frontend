@@ -24,6 +24,7 @@ export class PreviewStage {
     this.planeTexture = null;
     this.particles = null;
     this.bottle = null;
+    this.brand = null; // プレビュー中のブランド（粒のテーマ色フォールバックに使う）
     this.canvas = null;
     this._bottleToken = 0; // 非同期ロードの競合ガード
   }
@@ -93,6 +94,7 @@ export class PreviewStage {
       planeW: this.planeW,
       planeH: this.planeH,
       target: this.bottleCenter,
+      themeColor: this.brand?.themeColor, // 選択中ボトルのテーマ色を本番同様に反映
     });
     this.particles.points.visible = false;
     world.scene.add(this.particles.points);
@@ -113,6 +115,11 @@ export class PreviewStage {
   async setBrand(brand) {
     const { world, choreo } = this.ctx;
     const token = ++this._bottleToken;
+    // ブランドが変わったら粒のテーマ色フォールバックも追従させて再構築
+    if (brand?.slug !== this.brand?.slug) {
+      this.brand = brand ?? null;
+      if (this.particles) this.rebuildParticles();
+    }
     if (this.bottle) {
       disposeObject3D(this.bottle);
       this.bottle = null;

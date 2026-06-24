@@ -39,15 +39,19 @@ export class PhotoParticles {
 
   /**
    * @param {HTMLCanvasElement} canvas 表示用スナップショット
-   * @param {{planeCenter: THREE.Vector3, planeW: number, planeH: number, target: THREE.Vector3}} opts
+   * @param {{planeCenter: THREE.Vector3, planeW: number, planeH: number, target: THREE.Vector3, themeColor?: string}} opts
    */
-  buildFromCanvas(canvas, { planeCenter, planeW, planeH, target }) {
+  buildFromCanvas(canvas, { planeCenter, planeW, planeH, target, themeColor }) {
     const [gw, gh] = this.cfg.grid;
     const count = gw * gh;
 
     this._target.copy(target);
     this._planeCenter.copy(planeCenter);
     this._planeSize.set(planeW, planeH);
+    // 色を落とす（useImageColor=false）際のフォールバック色。各飲料のテーマカラーを
+    // 引き継ぎ、グレーではなくその色味へ溶け込ませる。未指定（エディタのテストパターン等）は
+    // 白＝従来どおりのグレースケール挙動。aColor と同じ raw sRGB で扱う（線形化しない）。
+    this._themeColor = hexToRGB(themeColor ?? this.cfg.themeColor);
     this._buildStream();
 
     const ctx = canvas.getContext('2d');
@@ -128,6 +132,7 @@ export class PhotoParticles {
         uBrightMin: { value: this.cfg.brightMin ?? 0.35 },
         uBrightMax: { value: this.cfg.brightMax ?? 1.0 },
         uBrightRandom: { value: this.cfg.brightRandom ?? 0.25 },
+        uThemeColor: { value: this._themeColor },
         // 切り替え直後は画像色 → 時間で最終状態（useImageColor=false なら単色）へ遷移
         uColorFadeStart: { value: this.cfg.colorFadeStart ?? 1.4 },
         uColorFadeEnd: { value: this.cfg.colorFadeEnd ?? 3.5 },
@@ -167,6 +172,9 @@ export class PhotoParticles {
         uHelixDrop: { value: this.cfg.helixDrop },
         uHelixFade: { value: this.cfg.helixFade },
         uSizeGrow: { value: this.cfg.sizeGrow },
+        // 大小のばらけ具合（分布の偏り）。aSeed.z^bias の指数。大きいほど極端
+        // （ほとんど小粒＋ごく一部だけ巨大）、1 に近いほどなめらか（小〜大が連続）。
+        uSizeGrowBias: { value: this.cfg.sizeGrowBias ?? 6.0 },
         uSurviveRatio: { value: this.cfg.surviveRatio },
         uSizeWorld: { value: this.cfg.size },
         uProjScale: { value: 1000 },
@@ -377,6 +385,19 @@ function fallbackTexture() {
   return _fallbackTex;
 }
 
+// '#rrggbb' / 'rrggbb' を raw sRGB の vec3(0..1) へ。aColor（写真ピクセル /255）と
+// 同じ非線形 sRGB のまま扱うため、THREE.Color の線形化は通さない。未指定は白。
+function hexToRGB(hex) {
+  if (!hex || typeof hex !== 'string') return new THREE.Vector3(1, 1, 1);
+  const h = hex.replace('#', '').trim();
+  if (h.length < 6) return new THREE.Vector3(1, 1, 1);
+  return new THREE.Vector3(
+    parseInt(h.slice(0, 2), 16) / 255,
+    parseInt(h.slice(2, 4), 16) / 255,
+    parseInt(h.slice(4, 6), 16) / 255
+  );
+}
+
 /** 決定論的PRNG（シードはエディタ調整に対して安定） */
 function mulberry32(a) {
   return function () {
@@ -499,6 +520,7 @@ uniform float uUseImageColor;
 uniform float uBrightMin;
 uniform float uBrightMax;
 uniform float uBrightRandom;
+uniform vec3 uThemeColor;
 uniform float uColorFadeStart;
 uniform float uColorFadeEnd;
 uniform float uSwapPixelRadius;
@@ -533,6 +555,7 @@ uniform float uHelixDescent;
 uniform float uHelixDrop;
 uniform float uHelixFade;
 uniform float uSizeGrow;
+uniform float uSizeGrowBias;
 uniform float uSurviveRatio;
 uniform float uSizeWorld;
 uniform float uProjScale;
@@ -567,12 +590,13 @@ vec3 streamBezier(float t) {
 void main() {
   // 切り替え直後は必ず画像色から始まる。最終状態は useImageColor で決まり、
   // 色を落とす場合（useImageColor=false）は [colorFadeStart, colorFadeEnd] 秒で
-  // 画像色 → 単色（明度を [min,max] へ再マップ＋粒ごとランダム）へ滑らかに遷移する。
-  // useImageColor=true なら最終状態も画像色なので、結果的に終始色付きのまま。
+  // 画像色 → テーマ色（明度を [min,max] へ再マップ＋粒ごとランダムし、飲料の
+  // テーマカラー uThemeColor で着色）へ滑らかに遷移する。uThemeColor=白なら
+  // 従来どおりのグレースケール。useImageColor=true なら終始画像色のまま。
   vec3 colored = aColor;
   float lum = dot(aColor, vec3(0.299, 0.587, 0.114));
   float n = clamp(lum + (aSeed.x - 0.5) * uBrightRandom, 0.0, 1.0);
-  vec3 mono = vec3(mix(uBrightMin, uBrightMax, n));
+  vec3 mono = uThemeColor * mix(uBrightMin, uBrightMax, n);
   vec3 finalCol = (uUseImageColor > 0.5) ? colored : mono;
   float colorFade = smoothstep(uColorFadeStart, uColorFadeEnd, uTime);
   vColor = mix(colored, finalCol, colorFade);
@@ -648,7 +672,7 @@ void main() {
   // 写真状態では均一サイズ。生き残った粒のうち少数だけが大きな球へ成長
   // （pow で偏らせ、大小の混ざった疎な球の群れにする）
   float flightT = clamp(t / uFlightDur, 0.0, 1.0);
-  float grow = 1.0 + uSizeGrow * pow(aSeed.z, 6.0) * smoothstep(0.15, 0.8, flightT) * survive;
+  float grow = 1.0 + uSizeGrow * pow(aSeed.z, uSizeGrowBias) * smoothstep(0.15, 0.8, flightT) * survive;
   // システム指定サイズ（成長・退場フェードを反映した通常時）の画面ピクセル径。
   float normalWorld = uSizeWorld * (grow * mix(1.0, 0.35, fade) + aIsHero * 0.3);
   float normalPx = normalWorld * uProjScale / max(-mvPosition.z, 0.05);

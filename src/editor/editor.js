@@ -633,6 +633,7 @@ const PARTICLE_LABELS = {
   swapPixelRadius: '切替直後の粒半径(px)',
   swapSizeBoostDur: '切替直後サイズ・収束秒',
   sizeGrow: '成長量',
+  sizeGrowBias: 'サイズ分布の偏り (なめらか⇔極端)',
   surviveRatio: '生存率',
   rippleLead: '波・開始遅延',
   rippleAmp: '波・振幅',

@@ -105,6 +105,7 @@ export class GenerateSequence extends Sequence {
       planeW,
       planeH,
       target: bottleCenter,
+      themeColor: brand.themeColor, // 色を落とす際にこの飲料のテーマカラーへ溶け込ませる
     });
 
     // --- カメラ追従ターゲット登録 ---

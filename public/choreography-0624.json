@@ -110,7 +110,7 @@
       ],
       "size": 0.018,
       "sizeGrow": 6,
-      "surviveRatio": 0.04,
+      "surviveRatio": 0.22,
       "rippleLead": 1.4,
       "rippleAmp": 0.16,
       "rippleFreq": [
@@ -118,21 +118,21 @@
         6
       ],
       "rippleSpeed": 2.4,
-      "dissolveDelaySpread": 2.2,
+      "dissolveDelaySpread": 4.96,
       "headLead": -0.1,
       "flightDuration": 4.5,
-      "lateralRadius": 0.18,
+      "lateralRadius": 0.61,
       "twist": 3,
       "noiseAmp": 0.06,
       "noiseFreq": 0.7,
       "streamP1Offset": [
-        0.6,
-        1.5,
+        0.441,
+        3.986,
         0.8
       ],
       "streamP2Offset": [
-        0,
-        0,
+        -0.883,
+        -3.196,
         0
       ],
       "helixEntryTangent": 0.4,
@@ -142,8 +142,20 @@
       "helixBobAmp": 0.04,
       "helixBobFreq": 0.8,
       "helixDescent": 0.28,
-      "helixDrop": 1.2,
-      "helixFade": 7
+      "helixDrop": 0.91,
+      "helixFade": 17.01,
+      "useImageColor": false,
+      "brightMin": -0.04,
+      "brightMax": 0.83,
+      "brightRandom": 0.32,
+      "grainImage": "",
+      "colorFadeStart": 1.4,
+      "colorFadeEnd": 3.5,
+      "swapSizeBoost": 0.8,
+      "swapSizeBoostDur": 1.5,
+      "dissolveNoiseScale": 6,
+      "dissolveEdge": 0.3,
+      "swapPixelRadius": 30
     },
     "photoDistance": 2.2,
     "bottlePos": [
@@ -152,7 +164,34 @@
       -6
     ],
     "bottleScale": 1.6,
-    "lights": [],
+    "lights": [
+      {
+        "id": "point-1",
+        "type": "directional",
+        "pos": [
+          10.394,
+          1.909,
+          -4.114
+        ],
+        "color": "#ffffff",
+        "intensity": 5.2,
+        "distance": 0,
+        "decay": 2,
+        "target": [
+          7.18,
+          0.5,
+          0
+        ],
+        "angle": 0.6,
+        "penumbra": 0.3,
+        "colorKeys": [
+          {
+            "t": 11.42,
+            "c": "#ffffff"
+          }
+        ]
+      }
+    ],
     "shots": [
       {
         "id": "photoRecede",
@@ -163,8 +202,8 @@
           {
             "p": [
               4.208,
-              1.438,
-              -2.735
+              1.61,
+              -2.933
             ],
             "look": [
               0,
@@ -243,8 +282,8 @@
       {
         "id": "pathcut-1",
         "type": "path",
-        "start": 5.617,
-        "duration": 2.1,
+        "start": 5.917,
+        "duration": 2.3,
         "ease": "power2.inOut",
         "path": [
           {
@@ -270,12 +309,9 @@
           1
         ],
         "lookAt": {
-          "mode": "fixed",
-          "point": [
-            0,
-            0.5,
-            0
-          ]
+          "mode": "target",
+          "target": "heroParticle",
+          "lerp": 0.085
         },
         "fov": 45
       },
@@ -346,38 +382,101 @@
         ]
       },
       {
-        "id": "pathcut-2",
+        "id": "pathcut-5",
         "type": "path",
-        "start": 9.483,
-        "duration": 4.9,
+        "start": 9.083,
+        "duration": 1.8,
         "ease": "power2.inOut",
         "path": [
-          {
-            "p": [
-              9.952,
-              1.975,
-              -6.053
-            ]
-          },
-          {
-            "p": [
-              9.967,
-              2.563,
-              -6.133
-            ]
-          }
+          [
+            10.105,
+            2.847,
+            -5.876
+          ],
+          [
+            10.097,
+            3.387,
+            -5.903
+          ]
         ],
         "times": [
           0,
           1
         ],
         "lookAt": {
-          "mode": "fixed",
-          "point": [
-            0,
-            0.5,
-            0
+          "mode": "target",
+          "target": "bottle",
+          "lerp": 0.085
+        },
+        "fov": 45
+      },
+      {
+        "id": "pathcut-4",
+        "type": "path",
+        "start": 14.033,
+        "duration": 1.8,
+        "ease": "power2.inOut",
+        "path": [
+          {
+            "p": [
+              9.786,
+              1,
+              -5.346
+            ],
+            "hIn": [
+              0.23,
+              -0.033,
+              -0.064
+            ],
+            "hOut": [
+              -0.23,
+              0.033,
+              0.064
+            ]
+          },
+          [
+            9.468,
+            1.178,
+            -5.559
           ]
+        ],
+        "times": [
+          0,
+          1
+        ],
+        "lookAt": {
+          "mode": "target",
+          "target": "heroParticle",
+          "lerp": 0.085
+        },
+        "fov": 45
+      },
+      {
+        "id": "pathcut-3",
+        "type": "path",
+        "start": 11.983,
+        "duration": 2,
+        "ease": "power2.inOut",
+        "path": [
+          [
+            9.213,
+            0.616,
+            -6.006
+          ],
+          [
+            10.212,
+            0.563,
+            -5.308
+          ]
+        ],
+        "times": [
+          0,
+          1
+        ],
+        "lookAt": {
+          "mode": "target",
+          "target": "bottle",
+          "lerp": 0.085
         },
         "fov": 45
       },
@@ -428,6 +527,71 @@
         "relativeTo": "bottle",
         "endFlash": true
       }
+    ],
+    "sounds": [
+      {
+        "id": "beep1",
+        "start": 0.5,
+        "sound": "beep",
+        "freq": 660,
+        "duration": 0.1,
+        "volume": 0.25,
+        "enabled": true
+      },
+      {
+        "id": "beep2",
+        "start": 3,
+        "sound": "beep",
+        "freq": 880,
+        "duration": 0.1,
+        "volume": 0.25,
+        "enabled": true
+      },
+      {
+        "id": "beep3",
+        "start": 8.6,
+        "sound": "beep",
+        "freq": 1320,
+        "duration": 0.14,
+        "volume": 0.3,
+        "enabled": true
+      },
+      {
+        "id": "beep4",
+        "start": 5.821,
+        "sound": "beep",
+        "freq": 880,
+        "duration": 0.12,
+        "volume": 0.3,
+        "enabled": true
+      },
+      {
+        "id": "beep5",
+        "start": 7.1,
+        "sound": "beep",
+        "freq": 880,
+        "duration": 0.12,
+        "volume": 0.3,
+        "enabled": true
+      },
+      {
+        "id": "beep6",
+        "start": 11.276,
+        "sound": "beep",
+        "freq": 880,
+        "duration": 0.12,
+        "volume": 0.3,
+        "enabled": true
+      },
+      {
+        "id": "beep7",
+        "start": 15.717,
+        "sound": "beep",
+        "freq": 880,
+        "duration": 0.12,
+        "volume": 0.3,
+        "enabled": true
+      }
     ]
   },
   "result": {
@@ -462,6 +626,78 @@
       "elementsStagger": 0.12,
       "elementDuration": 0.45,
       "whiteHold": 0.7
+    },
+    "rect": {
+      "heightPct": 10,
+      "dropDuration": 0.7,
+      "dropEase": "power2.out",
+      "holdFull": 0.15,
+      "settleDuration": 0.9,
+      "settleEase": "power3.inOut"
+    }
+  },
+  "scene": {
+    "fog": {
+      "enabled": false,
+      "near": 12.7,
+      "far": 22
+    },
+    "glass": {
+      "tint": "#ffffff",
+      "roughness": 0,
+      "ior": 1.64,
+      "transmission": 1,
+      "thickness": 0,
+      "envMapIntensity": 2
+    },
+    "postfx": {
+      "enabled": true,
+      "dof": {
+        "enabled": true,
+        "focusDistance": 3,
+        "focusRange": 4,
+        "bokehScale": 2,
+        "resolutionScale": 0.5
+      },
+      "afterimage": {
+        "enabled": false,
+        "damp": 0.85
+      }
+    },
+    "sky": {
+      "enabled": false,
+      "image": "",
+      "intensity": 1,
+      "blurriness": 0
+    }
+  },
+  "sfx": {
+    "select": {
+      "sound": "sounds/select.mp3",
+      "volume": 0.5,
+      "enabled": true
+    },
+    "countdown": {
+      "sound": "beep",
+      "freq": 1320,
+      "duration": 0.12,
+      "volume": 0.4,
+      "enabled": true
+    },
+    "shutter": {
+      "sound": "sounds/shutter.mp3",
+      "volume": 0.7,
+      "enabled": true
+    },
+    "resultAppear": {
+      "sound": "sounds/result.mp3",
+      "volume": 0.5,
+      "enabled": true
+    },
+    "bottleSlideIn": {
+      "sound": "sounds/slide-in.mp3",
+      "volume": 0.35,
+      "enabled": true
     }
   }
 }

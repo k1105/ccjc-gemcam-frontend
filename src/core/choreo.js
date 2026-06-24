@@ -3,11 +3,11 @@ import choreographyJson from '../choreo/choreography.json';
 const STORAGE_KEY = 'ccjc:choreo';
 // public/ 直下に置いた実行時差し替え用の振付ファイル。
 // ビルドし直さずに差し替えられるよう、import せず fetch で取得する。
-const RUNTIME_URL = `${import.meta.env.BASE_URL}choreography-2.json`;
+const RUNTIME_URL = `${import.meta.env.BASE_URL}choreography-0624.json`;
 
 /**
  * choreography.json のランタイムストア。
- * 実行時に public/choreography-2.json を fetch して初期データとする（Choreo.load）。
+ * 実行時に public/choreography-0624.json を fetch して初期データとする（Choreo.load）。
  * 取得に失敗した場合は bundled の src/choreo/choreography.json にフォールバックする。
  * いずれの場合も bundled を「既定値」とし、取得ファイルに存在しないプロパティは
  * 初期値で補完されるため、後方互換性のないファイルでも読み込める。
@@ -18,7 +18,7 @@ const RUNTIME_URL = `${import.meta.env.BASE_URL}choreography-2.json`;
  */
 export class Choreo {
   /**
-   * public/choreography-2.json を取得して Choreo を構築する非同期ファクトリ。
+   * public/choreography-0624.json を取得して Choreo を構築する非同期ファクトリ。
    * 取得失敗時は bundled の初期値で構築する。
    */
   static async load() {

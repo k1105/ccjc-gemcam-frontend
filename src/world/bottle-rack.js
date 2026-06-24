@@ -6,7 +6,7 @@ import { playSfx } from '../core/audio.js';
 /**
  * 10本のボトルラインナップ。アプリ起動時に1度だけ構築し、ループをまたいで再利用する。
  * - idle 揺れ（tick は main.js が world に常駐登録）
- * - selectAndSink(): 選択ボトルが回転しながら画面下へ沈む
+ * - selectAndFrameOut(): 選択ボトルを拡大、非選択を左右へフレームアウト（選択は色帯が通過して覆う）
  * - returnFromLeft(): 全ボトルが左から回転しながら定位置へ戻る
  */
 export class BottleRack {
@@ -122,45 +122,61 @@ export class BottleRack {
     return entry.root.getWorldPosition(out);
   }
 
-  /** 選択ボトルを回転させながら画面下へ沈めて非表示にする */
-  selectAndSink(slug, bag) {
-    const cfg = this.choreo.data.select.sink;
-    const hl = this.choreo.data.select.highlight;
+  /**
+   * 選択演出（待機画面）:
+   *  step1: 選択ボトルを scale 倍に拡大し、非選択ボトルを左右へフレームアウトさせる
+   *         （選択より左にあるボトルは左、右にあるボトルは右へ）。
+   *  step2: 選択ボトルは拡大したまま定位置に残し、下から上へ通過する色帯で覆い隠す
+   *         （持ち上げはしない）。
+   * step2 開始時（色帯起動タイミング）に onStep2 を1度呼び（呼び出し側が色帯演出を起動）、
+   * 同時に返り値の Promise を解決して制御を返す。拡大状態のまま残る選択ボトルは
+   * SHOOT 遷移時の disposeAll 後も 3D シーンに留まるが、その頃には色帯が全画面を
+   * 覆っているため見えず、次サイクルの prepareReturn / resetInstant で初期化される。
+   */
+  selectAndFrameOut(slug, bag, onStep2) {
+    const t = this.choreo.data.select.transition;
     const entry = this.bottles.get(slug);
-    if (!entry) return Promise.resolve();
+    if (!entry) {
+      onStep2?.();
+      return Promise.resolve();
+    }
 
     this.swayEnabled = false;
     return new Promise((resolve) => {
-      const tl = bag.timeline({ onComplete: resolve });
+      const tl = bag.timeline();
 
-      // 選択強調: 非選択ボトルを opacity=dimOpacity へ、選択ボトルを scale 倍へ。
-      // いずれも滑らかなイージングで t=0 から同時に進める。
-      let sinkAt = cfg.preDelay;
-      if (hl) {
-        for (const other of this.bottles.values()) {
-          if (other === entry) continue;
-          for (const m of other.mats) {
-            tl.to(m, { opacity: hl.dimOpacity, duration: hl.duration, ease: hl.ease }, 0);
-          }
-        }
-        tl.to(entry.spin.scale, {
-          x: hl.scale, y: hl.scale, z: hl.scale,
-          duration: hl.duration, ease: hl.ease,
-        }, 0);
-        // 強調を見せきってから沈める（hold ぶん間を置く）
-        sinkAt = hl.duration + (hl.hold ?? 0) + cfg.preDelay;
-      }
+      // step1: 選択ボトルを拡大
+      tl.to(entry.spin.scale, {
+        x: t.scale, y: t.scale, z: t.scale,
+        duration: t.scaleDuration, ease: t.scaleEase,
+      }, 0);
 
-      // 画像板なので回転はさせず、下へ沈める動きだけ
-      tl.to(entry.root.position, {
-        y: cfg.dropY,
-        duration: cfg.duration,
-        ease: cfg.ease,
-      }, sinkAt);
-      tl.add(() => {
-        entry.root.visible = false;
+      // step1: 非選択ボトルを左右へフレームアウト（中心＝選択に近い順にわずかにずらす）
+      const others = [...this.bottles.values()]
+        .filter((o) => o !== entry)
+        .sort((a, b) => Math.abs(a.index - entry.index) - Math.abs(b.index - entry.index));
+      const stagger = t.sideStagger ?? 0;
+      let sideOutEnd = 0; // 全非選択ボトルが左右へ抜けきる時刻
+      others.forEach((other) => {
+        const dir = other.index < entry.index ? -1 : 1;
+        const dist = Math.abs(other.index - entry.index);
+        const at = (dist - 1) * stagger;
+        sideOutEnd = Math.max(sideOutEnd, at + t.sideDuration);
+        tl.to(other.root.position, {
+          x: other.baseX + dir * t.sideX,
+          duration: t.sideDuration, ease: t.sideEase,
+        }, at);
       });
-      tl.to({}, { duration: cfg.postDelay });
+
+      // step2: 非選択が抜けきってから hold ぶん間を置いて色帯を起動（onStep2）。
+      // 選択ボトルは拡大したまま定位置に残し、下から上へ通過する色帯で覆い隠す
+      // （持ち上げるとベースラインが揃わず崩れて見えるため、移動はさせない）。
+      // 開始時に制御を呼び出し側へ返す（拡大より左右フレームアウトの方が長いので後者を基準にする）。
+      const bandAt = Math.max(t.scaleDuration, sideOutEnd) + (t.hold ?? 0);
+      tl.add(() => {
+        onStep2?.();
+        resolve();
+      }, bandAt);
     });
   }
 

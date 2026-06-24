@@ -54,6 +54,11 @@
       <div id="result-rect"></div>
     </div>
 
+    <!-- 待機画面の選択演出: ブランドカラーの帯（下→上へ流れて SHOOT へハンドオフ）。
+         display:none では切り替えず、常時レイヤー化したまま visibility/transform で出し入れする
+         （表示瞬間のレイヤー再生成によるフレーム落ちを避けるため）。 -->
+    <div id="select-rect" aria-hidden="true"></div>
+
     <!-- White flash / transition overlay -->
     <div id="flash-overlay"></div>
 

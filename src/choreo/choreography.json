@@ -21,6 +21,24 @@
       }
     },
     "highlight": { "scale": 1.2, "dimOpacity": 0.8, "duration": 0.4, "ease": "power2.out", "hold": 0.25 },
+    "transition": {
+      "scale": 1.2,
+      "scaleDuration": 0.4,
+      "scaleEase": "power2.out",
+      "hold": 0.45,
+      "sideX": 3.2,
+      "sideDuration": 0.55,
+      "sideEase": "power2.in",
+      "sideStagger": 0.04,
+      "band": {
+        "riseDuration": 0.7,
+        "riseEase": "power2.out",
+        "holdFull": 0.12,
+        "maxHold": 0.8,
+        "flowDuration": 0.7,
+        "flowEase": "power2.in"
+      }
+    },
     "sink": { "duration": 1.5, "rotations": 2.5, "dropY": -2.4, "ease": "power2.in", "preDelay": 0.15, "postDelay": 0.35 },
     "return": { "perBottle": 0.55, "stagger": 0.16, "fromY": -2.6, "rotations": 1.0, "ease": "power3.out" },
     "camera": { "pos": [0, 0.3, 4.6], "look": [0, 0.0, 0], "fov": 42 },
@@ -46,7 +64,7 @@
       "sizeGrow": 6.0,
       "surviveRatio": 0.04,
       "rippleLead": 1.4,
-      "rippleAmp": 0.16,
+      "rippleAmp": 0.0,
       "rippleFreq": [9.0, 6.0],
       "rippleSpeed": 2.4,
       "dissolveDelaySpread": 2.2,

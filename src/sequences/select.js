@@ -14,6 +14,7 @@ export class SelectSequence extends Sequence {
     this.selecting = false;
 
     overlay.hideAll();
+    overlay.resetBrandWipe(); // 前サイクル/強制リセットの選択演出の帯を確実に消す
     overlay.showSelectGradient(choreo.data.select.gradient); // 待機画面上端の影
     this.ctx.webcam.release(); // ウォームアップ後にESC等で戻った場合のLED消灯を保証
     bottleRack.setVisible(true);
@@ -62,14 +63,29 @@ export class SelectSequence extends Sequence {
   }
 
   async _select(brand) {
-    const { bottleRack, manager, webcam } = this.ctx;
+    const { bottleRack, manager, webcam, overlay, choreo } = this.ctx;
     this.selecting = true;
     console.log(`[Select] brand=${brand.slug}`);
     playSfx(this.ctx.choreo, 'select');
-    // 沈下アニメ中にWebカメラをウォームアップ → SHOOT がシームレスに始まる
+    // 選択演出中にWebカメラをウォームアップ → 色帯が捲れた瞬間にカメラが映る
     webcam.acquire().catch(() => {});
-    await bottleRack.selectAndSink(brand.slug, this.bag);
-    manager.go('shoot', { brand });
+
+    const t = choreo.data.select.transition;
+    // SHOOT 側がカメラの初回フレーム準備を整えたら解決される（帯はこれを待ってから流す）
+    let signalCameraReady;
+    const cameraReady = new Promise((res) => { signalCameraReady = res; });
+
+    let bandDone = Promise.resolve();
+    // step1（拡大＋左右フレームアウト）→ step2（色帯を下から立ち上げて通過させる）
+    await bottleRack.selectAndFrameOut(brand.slug, this.bag, () => {
+      // step2: ブランドカラーの帯が全画面を覆い、覆い切ったら SHOOT へ切替、
+      // カメラ準備が整ってから（覆われている間に重いデコードを済ませて）上へ流れて去る
+      bandDone = overlay.brandWipeUp(brand.themeColor, t.band, () => {
+        manager.go('shoot', { brand, fromWipe: true, onReady: signalCameraReady });
+        return cameraReady;
+      });
+    });
+    await bandDone;
   }
 
   async exit() {

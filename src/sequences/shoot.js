@@ -22,7 +22,8 @@ export class ShootSequence extends Sequence {
     const screen = overlay.screens.shoot;
     overlay.hideAll();
     overlay.hideCountdown();
-    gsap.set(screen, { opacity: 0 });
+    // 色帯ワイプ経由なら帯が画面を覆っている裏で即表示（帯が捲れてカメラが現れる）
+    gsap.set(screen, { opacity: payload.fromWipe ? 1 : 0 });
     gsap.set(overlay.shootCaption, { opacity: 0 });
     overlay.show('shoot');
 
@@ -50,8 +51,15 @@ export class ShootSequence extends Sequence {
       overlay.videoPlaceholder.classList.remove('hidden');
     }
 
-    // 3Dシーン → カメラ映像へクロスフェード（シームレスな切り替え）
-    this.bag.to(screen, { opacity: 1, duration: 0.7, ease: 'power2.inOut' });
+    // 色帯ワイプ経由なら、カメラ初回フレーム準備が整ったことを SELECT 側へ通知する。
+    // これにより帯は“覆われている間”に重いデコードを終えてから流れ、流れ中のジャンクを避ける。
+    payload.onReady?.();
+
+    // 3Dシーン → カメラ映像へクロスフェード（シームレスな切り替え）。
+    // 色帯ワイプ経由のときは帯のハンドオフで切り替わるのでフェードは省略。
+    if (!payload.fromWipe) {
+      this.bag.to(screen, { opacity: 1, duration: 0.7, ease: 'power2.inOut' });
+    }
     this.bag.to(overlay.shootCaption, { opacity: 1, duration: 0.6, delay: 0.45 });
 
     keyboard.setHandler((key) => {

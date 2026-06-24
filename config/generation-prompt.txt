@@ -1,6 +1,9 @@
 Two reference images. IMAGE 1 = the person/people. IMAGE 2 = a drink bottle.
 
-Turn the people in IMAGE 1 into cute, pop designer-toy 3DCG characters with a MODERATE, friendly deformation — slightly oversized head, clean simplified appealing face, smooth toy body, glossy vinyl/plastic. Keep it cute and clean; do NOT over-deform, and never make scary, grotesque, or uncanny faces.
+Turn the people in IMAGE 1 into cute, pop designer-toy 3DCG characters.Strict anatomy: exactly one head, one face, and normal limbs per character.
+Preserve each individual's identity: facial structure, hairstyle, skin tone, body type, and overall vibe.
+Preserve each individual's ORIGINAL pose and body posture from the first image as closely as possible. Do not invent, exaggerate, or restyle the poses.
+Keep the clothing each person actually wears in the first image. If the photo shows only the upper body, complete the outfit naturally in the same style (matching bottoms and shoes). Every character must be fully clothed.
 
 Count & separation: output EXACTLY one character per person in IMAGE 1, each a SEPARATE, complete, free-standing figure with its own single head and body. Never fuse or merge people, and never add a clone, twin, or mirrored copy. If IMAGE 1 has ONE person, render ONE character only.
 

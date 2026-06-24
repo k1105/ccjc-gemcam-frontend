@@ -278,6 +278,27 @@ body.editor-active * {
   will-change: transform;
 }
 
+/*
+ * 待機画面の選択演出のブランドカラー帯。result の帯（上→下）を上下反転したモーション。
+ * 高さは常に 100vh。初期は画面下に待避（translateY:100%）し、JS(gsap) が
+ * yPercent を 100→0（下から登場して全画面を覆う）→ -100（上へ流れて画面外へ）と動かす。
+ * canvas/screen(z:10) より上、flash(z:100) より下に置き、SHOOT のカメラ画面を覆ってから捲る。
+ * background-color はブランドごとに JS で上書きする。
+ */
+#select-rect {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100vh;
+  background: #000;
+  transform: translateY(100%); /* 画面下に待避（gsap が yPercent で動かす） */
+  visibility: hidden; /* 待機中は非表示。display:none は使わずレイヤーを維持する */
+  z-index: 50;
+  pointer-events: none;
+  will-change: transform;
+}
+
 /* --- flash / whiteout overlay --- */
 #flash-overlay {
   position: fixed;

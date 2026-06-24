@@ -125,9 +125,19 @@ export class GenerateSequence extends Sequence {
     });
 
     // --- 生成APIは演出と並行して即時開始 ---
+    // pullBack を見せ終えた時点で「完了済みか」を即判定したいので、結果/失敗を
+    // フラグに控えておく（.then の rejection ハンドラが未処理拒否警告も兼ねる）。
+    this.apiResult = null;
+    this.apiError = null;
     this.apiPromise = api.generateToyImage(brand.slug, apiSnapshotDataUrl, () => {});
-    // 本処理は _run 側で await する。それまでに reject した場合の未処理拒否警告を抑止
-    this.apiPromise.catch(() => {});
+    this.apiPromise.then(
+      (r) => {
+        this.apiResult = r;
+      },
+      (e) => {
+        this.apiError = e;
+      }
+    );
 
     // 編成本体（exit 時に director.stop() で停止する）
     this._run(gcfg).catch((err) => {
@@ -139,9 +149,9 @@ export class GenerateSequence extends Sequence {
 
   async _run(gcfg) {
     const { overlay, manager, director } = this.ctx;
-    let result = null;
 
-    // shots を順に再生。type:"loop"/"follow" が生成完了待ちのホールド点になる
+    // base ショットを順に再生し、必ず pullBack まで通しで見せる。
+    // type:"loop"/"follow"（生成完了待ちのホールド点）は特殊カットなので再生しない。
     for (let i = 0; i < gcfg.shots.length; i++) {
       const ph = gcfg.shots[i];
       if (this.bag.disposed) return;
@@ -156,40 +166,50 @@ export class GenerateSequence extends Sequence {
         // 写真の後退が終わったら平面→パーティクルへスワップして分解開始
         if (ph.id === 'photoRecede') this._swapToParticles();
       } else {
+        // ホールド系（loop/follow）。生成完了は待たず、1周（loopDuration / minHold）
+        // ぶんだけ通しで見せてから次フェーズへ抜ける（無限ループにはしない）。
         const hold = ph.type === 'follow' ? director.playFollow(ph) : director.playLoop(ph);
-        try {
-          result = await this.apiPromise;
-        } catch (err) {
-          if (this.bag.disposed) return;
-          console.error('[Generate] API error', err);
-          this._fail();
-          return;
-        }
-        if (this.bag.disposed) return;
-        // リザルト画像を事前ロード（フェードインのポップ防止）
-        await preloadImage(result.imageUrl).catch(() => {});
+        await this.bag.delay((ph.loopDuration ?? ph.minHold ?? 0) * 1000);
         if (this.bag.disposed) return;
         await hold.release();
+        if (this.bag.disposed) return;
       }
     }
     if (this.bag.disposed) return;
 
-    // ホールドフェーズの無い構成への保険
+    // pullBack まで見せ終えた時点で生成結果を確認する。
+    // 完了済みなら即座に遷移。未完了なら画面中央にロゴを出して完了を待つ。
+    if (this.apiError) {
+      this._fail();
+      return;
+    }
+    let result = this.apiResult;
     if (!result) {
+      overlay.showGenerateWaitLogo();
       try {
         result = await this.apiPromise;
       } catch (err) {
+        if (this.bag.disposed) return;
+        overlay.hideGenerateWaitLogo();
         console.error('[Generate] API error', err);
         this._fail();
         return;
       }
+      if (this.bag.disposed) return;
     }
+
+    // リザルト画像を事前ロード（フェードインのポップ防止）
+    await preloadImage(result.imageUrl).catch(() => {});
+    if (this.bag.disposed) return;
 
     overlay.flashWhite({
       inDur: 0.12,
       hold: 0.15,
       outDur: 0.8,
-      onWhite: () => manager.go('result', { result, brand: this.brand }),
+      onWhite: () => {
+        overlay.hideGenerateWaitLogo();
+        manager.go('result', { result, brand: this.brand });
+      },
     });
   }
 
@@ -242,9 +262,10 @@ export class GenerateSequence extends Sequence {
   }
 
   async exit() {
-    const { world, director } = this.ctx;
+    const { world, director, overlay } = this.ctx;
     director.stop();
     director.clearTargets();
+    overlay.hideGenerateWaitLogo(); // ESC/リセット含め待機ロゴの残留を防ぐ
     this.bag.disposeAll();
 
     if (this.lightRig) {

@@ -892,14 +892,12 @@ export class Timeline {
     const total = b.totalFrames;
     const toClip = (p) => {
       const overlay = p.layer === "overlay";
-      const holdNote =
-        p.type === "follow" || p.type === "loop" ? " (hold)" : "";
       return {
         id: p.id,
         className: `tlx-phase tlx-${p.type}`,
         leftPct: (p.startFrame / total) * 100,
         widthPct: (p.frameCount / total) * 100,
-        labelHtml: `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s${holdNote}</small></span>`,
+        labelHtml: `<span class="tlx-phase-label">${p.id} <small>${p.holdSec.toFixed(1)}s</small></span>`,
         // カット(overlay)ブロック=掴んでドラッグで start 移動。base=クリックで選択＋シーク
         title: overlay
           ? `${p.id} — クリックで選択 / ドラッグで開始位置を移動`
@@ -1265,9 +1263,6 @@ function injectStyles() {
 .tlx-static { background: linear-gradient(#7f6533, #695227); }
 .tlx-follow { background: linear-gradient(#6a4a8c, #573b75); }
 .tlx-loop   { background: linear-gradient(#2a7d72, #226359); }
-.tlx-follow, .tlx-loop {
-  background-image: repeating-linear-gradient(-45deg, rgba(255,255,255,0.06) 0 6px, transparent 6px 12px);
-}
 /* 音響ブロック: 小さく置き、ラベルははみ出して読ませる。✕は hover で出す */
 .tlx-sound {
   background: linear-gradient(#9c4b6e, #7c3a57);

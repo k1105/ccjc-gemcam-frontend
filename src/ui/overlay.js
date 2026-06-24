@@ -18,6 +18,7 @@ export class Overlay {
     this.shootCaption = document.getElementById('shoot-caption');
     this.countdown = document.getElementById('countdown');
     this.flash = document.getElementById('flash-overlay');
+    this.generateWaitLogo = document.getElementById('generate-wait-logo');
     this.result = {
       image: document.getElementById('result-image'),
       logo: document.getElementById('result-logo'),
@@ -35,6 +36,29 @@ export class Overlay {
 
   hideAll() {
     Object.values(this.screens).forEach((el) => el.classList.add('hidden'));
+    // 待機画面専用の上端グラデーションも必ず一緒に隠す（他画面への残留防止）。
+    // SELECT は hideAll の後に showSelectGradient で出し直す。
+    this.hideSelectGradient();
+    // GENERATE 待機ロゴの残留も防ぐ。
+    this.hideGenerateWaitLogo();
+  }
+
+  /** GENERATE 待機ロゴ（中央）をフェードインで表示する。 */
+  showGenerateWaitLogo() {
+    const el = this.generateWaitLogo;
+    if (!el) return;
+    gsap.killTweensOf(el);
+    el.classList.remove('hidden');
+    gsap.fromTo(el, { opacity: 0 }, { opacity: 1, duration: 0.4, ease: 'power2.out' });
+  }
+
+  /** GENERATE 待機ロゴを即座に隠す。 */
+  hideGenerateWaitLogo() {
+    const el = this.generateWaitLogo;
+    if (!el) return;
+    gsap.killTweensOf(el);
+    el.classList.add('hidden');
+    gsap.set(el, { opacity: 0 });
   }
 
   /**
@@ -81,47 +105,59 @@ export class Overlay {
    * 帯の表示は SELECT→SHOOT のシーケンス境界をまたいで継続する（overlay 直下の要素）。
    * 進行中に resetBrandWipe() が割り込んだら（ESC等）トークン不一致で安全に中断する。
    */
-  async brandWipeUp(color, cfg, onCovered) {
+  brandWipeUp(color, cfg, onCovered) {
     const el = this.selectRect;
-    if (!el) {
-      await onCovered?.();
-      return;
-    }
+    if (!el) return Promise.resolve(onCovered?.());
+
     const token = ++this._wipeToken;
     const alive = () => token === this._wipeToken;
 
     gsap.killTweensOf(el);
     el.style.backgroundColor = color || '#000';
-    gsap.set(el, { yPercent: 100, visibility: 'visible' });
+    el.style.visibility = 'visible';
+    gsap.set(el, { y: 0, yPercent: 100 }); // 画面下に待避（px成分を0に固定し yPercent のみで動かす）
 
-    // 下から登場して全画面を覆う
-    await gsap.to(el, { yPercent: 0, duration: cfg.riseDuration, ease: cfg.riseEase });
-    if (!alive()) return;
+    return new Promise((resolve) => {
+      const tl = gsap.timeline({
+        onComplete: () => {
+          if (alive()) {
+            el.style.visibility = 'hidden';
+            gsap.set(el, { y: 0, yPercent: 100 }); // 次サイクルに備えて画面下へ退避
+          }
+          resolve();
+        },
+      });
+      this._wipeTl = tl;
 
-    // 覆い切った裏でカメラ画面へハンドオフ（重い video アタッチ/デコードはこの間に）
-    const ready = Promise.resolve(onCovered?.());
-    // 最低 holdFull は覆ったまま保持し、カメラ準備完了 or maxHold で打ち切ってから流す
-    await Promise.all([
-      wait(cfg.holdFull ?? 0),
-      Promise.race([ready, wait(cfg.maxHold ?? 0)]),
-    ]);
-    if (!alive()) return;
-
-    // そのまま上へ流れて画面外へ → カメラ画面が出現
-    await gsap.to(el, { yPercent: -100, duration: cfg.flowDuration, ease: cfg.flowEase });
-    if (!alive()) return;
-
-    // 次サイクルに備えて画面下へ退避して非表示に
-    gsap.set(el, { yPercent: 100, visibility: 'hidden' });
+      // ① 下から登場して全画面を覆う
+      tl.to(el, { yPercent: 0, duration: cfg.riseDuration, ease: cfg.riseEase });
+      // ② 覆い切ったところで一旦停止し、裏でカメラ画面へハンドオフ（重い video アタッチ/
+      //    デコードはこの“覆われている”間に）。最低 holdFull は覆ったまま保持し、カメラ
+      //    準備完了 or maxHold で打ち切ってから ③ を再生する。
+      tl.addPause('+=0', () => {
+        const ready = Promise.resolve(onCovered?.());
+        Promise.all([
+          wait(cfg.holdFull ?? 0),
+          Promise.race([ready, wait(cfg.maxHold ?? 0)]),
+        ]).then(() => {
+          if (alive()) tl.play();
+        });
+      });
+      // ③ そのまま上へ流れて画面外へ → カメラ画面が出現
+      tl.to(el, { yPercent: -100, duration: cfg.flowDuration, ease: cfg.flowEase });
+    });
   }
 
   /** 強制リセット時などに選択演出の帯を即座に隠して初期化する（進行中の brandWipeUp も無効化） */
   resetBrandWipe() {
-    this._wipeToken = (this._wipeToken ?? 0) + 1; // 進行中ワイプを無効化
+    this._wipeToken = (this._wipeToken ?? 0) + 1; // 進行中ワイプを無効化（再生・後始末を抑止）
+    this._wipeTl?.kill();
+    this._wipeTl = null;
     const el = this.selectRect;
     if (!el) return;
     gsap.killTweensOf(el);
-    gsap.set(el, { yPercent: 100, visibility: 'hidden' });
+    el.style.visibility = 'hidden';
+    gsap.set(el, { y: 0, yPercent: 100 });
   }
 
   /** カウントダウン1拍ぶんの表示（CSSアニメ再トリガ） */

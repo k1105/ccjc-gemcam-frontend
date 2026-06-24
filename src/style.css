@@ -280,8 +280,8 @@ body.editor-active * {
 
 /*
  * 待機画面の選択演出のブランドカラー帯。result の帯（上→下）を上下反転したモーション。
- * 高さは常に 100vh。初期は画面下に待避（translateY:100%）し、JS(gsap) が
- * yPercent を 100→0（下から登場して全画面を覆う）→ -100（上へ流れて画面外へ）と動かす。
+ * 高さは常に 100vh。位置は gsap が yPercent を 100→0（下から登場して全画面を覆う）→
+ * -100（上へ流れて画面外へ）と動かす（初期待避も gsap が yPercent:100 で設定）。
  * canvas/screen(z:10) より上、flash(z:100) より下に置き、SHOOT のカメラ画面を覆ってから捲る。
  * background-color はブランドごとに JS で上書きする。
  */
@@ -292,11 +292,26 @@ body.editor-active * {
   width: 100%;
   height: 100vh;
   background: #000;
-  transform: translateY(100%); /* 画面下に待避（gsap が yPercent で動かす） */
+  /* 位置(transform)は gsap が yPercent で一元管理する。CSS で translateY(%) を初期値に置くと、
+     gsap が computed の px 行列として読み込み yPercent と二重化し、帯が画面外に居座ったまま
+     見えなくなる（＝色帯が出ずカメラへ遷移する不具合の原因）。待機中の不可視は visibility で担保。 */
   visibility: hidden; /* 待機中は非表示。display:none は使わずレイヤーを維持する */
   z-index: 50;
   pointer-events: none;
   will-change: transform;
+}
+
+/* --- GENERATE 待機ロゴ（生成未完了時に画面中央へ表示）--- */
+#generate-wait-logo {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: clamp(160px, 20vw, 320px);
+  height: auto;
+  filter: drop-shadow(0 1px 12px rgba(0, 0, 0, 0.5));
+  pointer-events: none;
+  z-index: 90; /* canvas/screen の上、flash(100) の下 */
 }
 
 /* --- flash / whiteout overlay --- */

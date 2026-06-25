@@ -39,9 +39,23 @@ function isGlassMaterial(mat) {
   return mat && mat.isMeshPhysicalMaterial && mat.transmission > 0;
 }
 
+// GLB の baseColor が「プリンシプルBSDF 既定の 0.8 グレー」かどうか。
+// 既定グレーは透過させると濁るので白へ正規化する対象。
+// 作者が意図的に着彩した色（例: 綾鷹の黄土色）はこの判定を外れ、色を保持する。
+function isDefaultGrayColor(color) {
+  const EPS = 0.02;
+  return (
+    Math.abs(color.r - 0.8) < EPS &&
+    Math.abs(color.g - 0.8) < EPS &&
+    Math.abs(color.b - 0.8) < EPS
+  );
+}
+
 // 1マテリアルへ現在の glassConfig を適用する
 function applyGlassConfig(mat) {
-  mat.color.set(glassConfig.tint);
+  // 既定グレーのガラスのみ白基調のクリアガラスへ正規化する。
+  // 着彩済みのガラス（綾鷹の黄土色など）は元の色を活かして透過させる。
+  if (isDefaultGrayColor(mat.color)) mat.color.set(glassConfig.tint);
   mat.transmission = glassConfig.transmission;
   mat.roughness = glassConfig.roughness;
   mat.metalness = 0;

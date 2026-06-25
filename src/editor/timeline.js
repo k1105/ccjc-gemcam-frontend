@@ -95,6 +95,7 @@ export class Timeline {
       fov: world.camera.fov,
     };
     world.cameraLocked = true;
+    world.setPostFXActive(true); // 本編は GENERATE のみ postfx 有効。プレビューでも見た目を合わせる
     bottleRack.setVisible(false);
 
     const brand = brands.getBySlug(this.brandSelect.value) ?? brands.list[0];
@@ -120,6 +121,7 @@ export class Timeline {
     this.playing = false;
     window.removeEventListener("keydown", this._onKeyDown, true);
     world.removeTickable(this._tick);
+    world.setPostFXActive(false); // プレビュー終了で postfx を待機状態（無効）へ戻す
     world.setDofEnabled(true); // Free で切っていた DOF を本編へ戻す
     this._disposeFreeView();
     this.pathEditor._disposeStream?.(); // particles 破棄に合わせてストリームのハンドルも破棄

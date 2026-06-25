@@ -682,6 +682,13 @@
       "afterimage": {
         "enabled": false,
         "damp": 0.85
+      },
+      "grade": {
+        "enabled": true,
+        "saturation": 0.12,
+        "brightness": 0,
+        "contrast": 0,
+        "hue": 0
       }
     },
     "sky": {

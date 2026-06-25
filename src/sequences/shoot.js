@@ -84,11 +84,11 @@ export class ShootSequence extends Sequence {
     }
     overlay.hideCountdown();
 
-    const snapshots = this._capture(overlay);
+    // フレームの取り込み（drawImage のみ＝高速）。重い PNG エンコードやカメラ解放は
+    // ここでは行わず、白フラッシュ裏（onWhite）へ回してシャッターの反応を即時にする。
+    const frames = this._grabFrames(overlay);
+    // シャッター音と白フラッシュを即発火（キー操作に即追従。ブロッキング処理を挟まない）
     playSfx(this.ctx.choreo, 'shutter');
-    this.ctx.webcam.release();
-    overlay.video.pause();
-    overlay.video.srcObject = null;
 
     // シャッターの白フラッシュ。白くなりきった瞬間に GENERATE へ切り替え、
     // フラッシュが抜けると3D空間の写真平面が現れる（シームレスなハンドオフ）
@@ -96,12 +96,28 @@ export class ShootSequence extends Sequence {
       inDur: 0.07,
       hold: cfg.postSnapDelay,
       outDur: 0.5,
-      onWhite: () => manager.go('generate', { brand: this.brand, ...snapshots }),
+      onWhite: () => {
+        // 画面が完全に白で覆われた裏で重い処理を行う（ジャンクは白に隠れて見えない）:
+        // PNG エンコード（同期・数十ms）と Web カメラ解放（track.stop）。
+        const apiSnapshotDataUrl = frames.apiCanvas.toDataURL('image/png');
+        this.ctx.webcam.release();
+        overlay.video.pause();
+        overlay.video.srcObject = null;
+        manager.go('generate', {
+          brand: this.brand,
+          apiSnapshotDataUrl,
+          displayCanvas: frames.dispCanvas,
+        });
+      },
     });
   }
 
-  /** video から API用 640x480 と 表示用（画面アスペクト）を同時にキャプチャ */
-  _capture(overlay) {
+  /**
+   * video から API用 640x480 と 表示用（画面アスペクト）の2枚を canvas へ描き込む（drawImage のみ）。
+   * PNG エンコード等の重い処理は呼び出し側が白フラッシュ裏で行う。
+   * @returns {{apiCanvas: HTMLCanvasElement, dispCanvas: HTMLCanvasElement}}
+   */
+  _grabFrames(overlay) {
     const video = overlay.video;
     const hasVideo = this.ctx.webcam.stream && video.readyState >= video.HAVE_CURRENT_DATA;
 
@@ -131,10 +147,7 @@ export class ShootSequence extends Sequence {
       drawPlaceholder(dispCtx, dispW, dispH);
     }
 
-    return {
-      apiSnapshotDataUrl: apiCanvas.toDataURL('image/png'),
-      displayCanvas: dispCanvas,
-    };
+    return { apiCanvas, dispCanvas };
   }
 
   async exit() {

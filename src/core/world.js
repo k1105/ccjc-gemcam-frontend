@@ -6,6 +6,8 @@ import {
   EffectPass,
   DepthOfFieldEffect,
   SMAAEffect,
+  HueSaturationEffect,
+  BrightnessContrastEffect,
 } from 'postprocessing';
 import { AfterimagePass } from '../world/afterimage-pass.js';
 
@@ -56,10 +58,18 @@ export class World {
     this.cameraOverride = null;
 
     // ポストプロセス（setupPostFX で有効化）。無効時は null のまま renderer 直描画。
+    // composer が存在しても postfxActive が false の間は直描画にフォールバックする。
+    // 待機（SELECT/SHOOT）では無効にして負荷を下げ、見せ場（GENERATE）でのみ有効化する。
+    this.postfxActive = false;
     this.composer = null;
     this.dof = null;
     this.dofPass = null; // DOF を含む EffectPass（enabled トグルで一時無効化する）
     this.afterimage = null;
+    // 色補正（彩度/明るさ/コントラスト/色相）。NeutralToneMapping で眠くなりがちな
+    // 発色を最終段で持ち上げるための grade パス。setGrade でライブ調整する。
+    this.hueSat = null;
+    this.brightnessContrast = null;
+    this.gradePass = null;
     // DOF のフォーカス対象（world 座標 Vector3 の参照 / null=固定距離）。
     // シーケンスが setFocusTarget で主役（ボトル等）を指す。
     this.focusTarget = null;
@@ -116,6 +126,22 @@ export class World {
         this.composer.addPass(this.afterimage);
       }
 
+      // 色補正は最終段（DOF/残像で出来上がった絵に対して）に掛ける。
+      // 彩度/色相は HueSaturationEffect、明るさ/コントラストは BrightnessContrastEffect で、
+      // 1 つの EffectPass に統合（pmndrs が色空間変換を含めてシェーダをマージする）。
+      const gradeCfg = cfg.grade ?? {};
+      this.hueSat = new HueSaturationEffect({
+        saturation: gradeCfg.saturation ?? 0, // -1..1（0=無変化）
+        hue: gradeCfg.hue ?? 0, // ラジアン
+      });
+      this.brightnessContrast = new BrightnessContrastEffect({
+        brightness: gradeCfg.brightness ?? 0, // -1..1
+        contrast: gradeCfg.contrast ?? 0, // -1..1
+      });
+      this.gradePass = new EffectPass(this.camera, this.brightnessContrast, this.hueSat);
+      this.gradePass.enabled = gradeCfg.enabled !== false;
+      this.composer.addPass(this.gradePass);
+
       this.composer.setSize(this.width, this.height);
     } catch (err) {
       console.error('[World] postprocessing 初期化失敗 — 直描画へ退避', err);
@@ -124,7 +150,27 @@ export class World {
       this.dof = null;
       this.dofPass = null;
       this.afterimage = null;
+      this.hueSat = null;
+      this.brightnessContrast = null;
+      this.gradePass = null;
     }
+  }
+
+  /**
+   * 色補正（彩度/明るさ/コントラスト/色相）をライブ更新する。postfx 無効（composer 未生成）時は no-op。
+   * cfg = { enabled, saturation, brightness, contrast, hue }（saturation/brightness/contrast は -1..1、hue はラジアン）。
+   */
+  setGrade(cfg) {
+    if (!cfg) return;
+    if (this.hueSat) {
+      this.hueSat.saturation = cfg.saturation ?? 0;
+      this.hueSat.hue = cfg.hue ?? 0;
+    }
+    if (this.brightnessContrast) {
+      this.brightnessContrast.brightness = cfg.brightness ?? 0;
+      this.brightnessContrast.contrast = cfg.contrast ?? 0;
+    }
+    if (this.gradePass) this.gradePass.enabled = cfg.enabled !== false;
   }
 
   /**
@@ -143,6 +189,15 @@ export class World {
    */
   setDofEnabled(on) {
     if (this.dofPass) this.dofPass.enabled = !!on;
+  }
+
+  /**
+   * ポストプロセス全体（DOF/SMAA/grade）の適用を切り替える。
+   * 待機（SELECT/SHOOT）では無効化して描画負荷を下げ、GENERATE 等の見せ場で有効化する。
+   * composer 未生成（postfx 無効 / 初期化失敗）時は no-op で renderer 直描画のまま。
+   */
+  setPostFXActive(on) {
+    this.postfxActive = !!on;
   }
 
   addTickable(fn) {
@@ -167,7 +222,7 @@ export class World {
     // base カメラ確定後に overlay カットを上書き（tick 追加順に依存せず必ず最後に被さる）
     if (this.cameraOverride) this.cameraOverride(dt, elapsed);
 
-    if (this.composer) this.composer.render(dt);
+    if (this.composer && this.postfxActive) this.composer.render(dt);
     else this.renderer.render(this.scene, this.camera);
   }
 

@@ -237,6 +237,30 @@ export class Editor {
       )
       .name('ファイルを選んで確認（未保存）');
 
+    // --- 色補正（彩度/明るさ/コントラスト/色相）。NeutralToneMapping で眠くなりがちな
+    // 発色を最終段で持ち上げる。postfx 無効時はパスが無いので調整は効かない（保存はされる）。
+    const postfx = (scene.postfx ??= {});
+    // 旧データ（localStorage 等）に grade が無い場合の既定値を補完
+    const grade = (postfx.grade ??= {
+      enabled: true,
+      saturation: 0.12,
+      brightness: 0,
+      contrast: 0,
+      hue: 0,
+    });
+    const applyGrade = () => {
+      world.setGrade(grade);
+      touch();
+    };
+    const gradeFolder = folder.addFolder('色補正（彩度・明るさ）');
+    gradeFolder.add(grade, 'enabled').name('有効').onChange(applyGrade);
+    gradeFolder.add(grade, 'saturation', -1, 1, 0.01).name('彩度').onChange(applyGrade);
+    gradeFolder.add(grade, 'brightness', -1, 1, 0.01).name('明るさ').onChange(applyGrade);
+    gradeFolder.add(grade, 'contrast', -1, 1, 0.01).name('コントラスト').onChange(applyGrade);
+    gradeFolder.add(grade, 'hue', -3.14, 3.14, 0.01).name('色相（ラジアン）').onChange(applyGrade);
+    // 起動直後（rebuild 時）も現在値を反映しておく
+    world.setGrade(grade);
+
     const applyGlass = () => {
       setGlassConfig(scene.glass);
       refreshGlassMaterials(world.scene);

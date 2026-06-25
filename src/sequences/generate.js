@@ -30,6 +30,12 @@ export class GenerateSequence extends Sequence {
     bottleRack.setVisible(false);
     overlay.hideAll();
 
+    // ポストプロセス（DOF/SMAA/grade）は見せ場の GENERATE だけ有効化する。
+    // 入場は SHOOT の白フラッシュ裏なので切り替わりは見えない。退場（ESC/リセット含む）で
+    // 必ず無効へ戻し、待機（SELECT/SHOOT）では直描画にして負荷を下げる。
+    world.setPostFXActive(true);
+    this.bag.add(() => world.setPostFXActive(false));
+
     // 配置ライト（generate.lights）をシーンへ反映＋経過秒でキーフレーム駆動
     this.lightRig = new LightRig(world.scene);
     this.lightRig.sync(gcfg.lights ?? []);

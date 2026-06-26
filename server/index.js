@@ -5,6 +5,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { generateToyImage } from './gemini.js';
+import { getProvider, getModel } from './provider.js';
 import { putImage } from './storage.js';
 import { saveLocalImage } from './local-store.js';
 import { saveGeneration } from './firestore.js';
@@ -34,7 +35,8 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     booth: BOOTH_ID || null,
-    model: process.env.GEMINI_MODEL || 'gemini-3.1-flash-image',
+    provider: getProvider(), // 'gemini'（APIキー方式）| 'vertex'（Agent Platform）
+    model: getModel(),
     mock: process.env.MOCK_GENERATION === 'true',
     keyCount: getMaskedKeys().count,
     brands: brands.map((b) => b.slug),
@@ -138,6 +140,8 @@ app.listen(PORT, () => {
   console.log(`[ccjc booth backend] listening on http://localhost:${PORT}${BOOTH_ID ? ` (booth=${BOOTH_ID})` : ' (booth未設定)'}`);
   if (process.env.MOCK_GENERATION === 'true') {
     console.log('[ccjc booth backend] MOCK_GENERATION=true (Gemini/Storage/Firestore を呼ばずモック応答)');
+  } else if (getProvider() === 'vertex') {
+    console.log(`[ccjc booth backend] 生成プロバイダ=vertex (Agent Platform) model=${getModel()}`);
   } else if (!hasKeys()) {
     console.warn('[ccjc booth backend] APIキー未設定 — フロントの設定パネル(Ctrl+K)から設定してください');
   }

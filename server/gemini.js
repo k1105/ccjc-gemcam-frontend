@@ -3,14 +3,11 @@
 import { readFileSync } from 'node:fs';
 import { extname, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GoogleGenAI } from '@google/genai';
 import { getBrand, resolveProductImagePath } from './brands.js';
-import { getAttemptOrder } from './api-keys.js';
+import { getAttemptClients, getModel, getProvider } from './provider.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROMPT_PATH = resolve(__dirname, '..', 'config', 'generation-prompt.txt');
-
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-image';
 
 // 生成1回あたりの上限。undici 既定の HeadersTimeout(300s) より先に
 // こちらで打ち切ってリトライする（混雑時は1回あたり2分超かかることがある）
@@ -62,17 +59,6 @@ function loadPromptTemplate() {
   }
 }
 
-// キーごとにクライアントを使い回す（毎回 new するとコネクション再確立で遅くなるため）。
-const _clients = new Map();
-function clientFor(apiKey) {
-  let c = _clients.get(apiKey);
-  if (!c) {
-    c = new GoogleGenAI({ apiKey });
-    _clients.set(apiKey, c);
-  }
-  return c;
-}
-
 function mimeFromPath(p) {
   const ext = extname(p).toLowerCase();
   if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
@@ -115,7 +101,7 @@ export async function generateToyImage(brandSlug, selfieBase64, selfieMime = 'im
   }
 
   const requestConfig = {
-    model: MODEL,
+    model: getModel(),
     contents,
     config: {
       httpOptions: { timeout: TIMEOUT_MS },
@@ -125,19 +111,23 @@ export async function generateToyImage(brandSlug, selfieBase64, selfieMime = 'im
     },
   };
 
-  // 試行するキーの順序（ラウンドロビンで開始位置が決まる）。
-  const keys = getAttemptOrder();
-  if (keys.length === 0) {
-    throw new Error('GEMINI_API_KEY が未設定です（フロントの設定パネル Ctrl+K から設定してください）');
+  // 試行するクライアント列。
+  //  - gemini: APIキープール（ラウンドロビン開始 + 残りをフェイルオーバー）
+  //  - vertex: 単一クライアント（Agent Platform。キープールは使わない）
+  const attempts = getAttemptClients();
+  if (attempts.length === 0) {
+    throw new Error(
+      getProvider() === 'vertex'
+        ? 'Agent Platform(Vertex)の初期化に失敗しました（GOOGLE_CLOUD_PROJECT / 認証情報を確認してください）'
+        : 'GEMINI_API_KEY が未設定です（フロントの設定パネル Ctrl+K から設定してください）'
+    );
   }
 
   let lastErr;
-  for (let k = 0; k < keys.length; k++) {
-    const apiKey = keys[k];
-    const cli = clientFor(apiKey);
-    const keyLabel = `key ${k + 1}/${keys.length}`;
+  for (let k = 0; k < attempts.length; k++) {
+    const { client: cli, label: keyLabel } = attempts[k];
 
-    // 同一キー内では一時的なネットワーク断のみ MAX_ATTEMPTS まで再試行する。
+    // 同一クライアント内では一時的なネットワーク断のみ MAX_ATTEMPTS まで再試行する。
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const t0 = Date.now();
       try {

@@ -34,7 +34,9 @@ export class Overlay {
    * 余白（上・左右）と高さはコンテナへ、各ロゴの上下左右オフセットは
    * CSS 変数として渡し（子要素の transform: translate に反映）、
    * gsap が触るコンテナの transform とは別レイヤーで効かせる。
-   * cfg: { height, marginTop, marginLeft, marginRight, left:{offsetX,offsetY}, right:{offsetX,offsetY} }
+   * cfg: { height, marginTop, marginLeft, marginRight,
+   *        left:{height?,offsetX,offsetY}, right:{height?,offsetX,offsetY} }
+   * 左右の height は個別サイズ（vh）。未指定なら共通 height にフォールバックする。
    */
   applyResultLogos(cfg) {
     const el = this.result.logo;
@@ -45,6 +47,8 @@ export class Overlay {
     el.style.setProperty('--logos-margin-top', `${cfg.marginTop ?? 5.5}vh`);
     el.style.setProperty('--logos-margin-left', `${cfg.marginLeft ?? 4.5}vw`);
     el.style.setProperty('--logos-margin-right', `${cfg.marginRight ?? 4.5}vw`);
+    el.style.setProperty('--logo-left-h', `${L.height ?? cfg.height ?? 7}vh`);
+    el.style.setProperty('--logo-right-h', `${R.height ?? cfg.height ?? 7}vh`);
     el.style.setProperty('--logo-left-x', `${L.offsetX ?? 0}px`);
     el.style.setProperty('--logo-left-y', `${L.offsetY ?? 0}px`);
     el.style.setProperty('--logo-right-x', `${R.offsetX ?? 0}px`);

@@ -658,15 +658,17 @@
       "settleEase": "power3.inOut"
     },
     "logos": {
-      "height": 4.6,
-      "marginTop": 6.2,
+      "height": 6.8,
+      "marginTop": 5,
       "marginLeft": 5,
       "marginRight": 5,
       "left": {
+        "height": 8.7,
         "offsetX": 0,
-        "offsetY": 0
+        "offsetY": -19
       },
       "right": {
+        "height": 6.8,
         "offsetX": 0,
         "offsetY": 0
       }

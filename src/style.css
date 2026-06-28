@@ -299,11 +299,14 @@ body.editor-active * {
   width: auto;
   display: block;
 }
+/* 各ロゴの高さ（vh）は個別指定があればそれを使い、無ければ共通 --logos-height に従う。 */
 /* 各ロゴの上下左右オフセット（px）。コンテナの gsap transform とは別要素なので競合しない。 */
 #result-logo-left {
+  height: var(--logo-left-h, var(--logos-height, 7vh));
   transform: translate(var(--logo-left-x, 0px), var(--logo-left-y, 0px));
 }
 #result-logo-right {
+  height: var(--logo-right-h, var(--logos-height, 7vh));
   transform: translate(var(--logo-right-x, 0px), var(--logo-right-y, 0px));
 }
 

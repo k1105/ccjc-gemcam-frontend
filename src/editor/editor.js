@@ -258,22 +258,37 @@ export class Editor {
     });
     c.left ??= { offsetX: 0, offsetY: 0 };
     c.right ??= { offsetX: 0, offsetY: 0 };
+    // 左右の個別サイズ（vh）。既存データは共通 height を初期値として引き継ぐ。
+    c.left.height ??= c.height;
+    c.right.height ??= c.height;
     const apply = () => {
       // リザルトプレビュー表示中なら即反映（非表示でも CSS 変数の更新は無害）
       overlay.applyResultLogos(c);
       touch();
     };
     const folder = parent.addFolder('ロゴ（上端・左右）');
-    folder.add(c, 'height', 1, 30, 0.1).name('高さ（画面高さ%）').onChange(apply);
+    // 共通の高さ。動かすと左右の個別サイズもまとめて揃える（個別微調整は各サイドで）。
+    let leftH, rightH;
+    folder
+      .add(c, 'height', 1, 30, 0.1)
+      .name('高さ（左右まとめて・画面高さ%）')
+      .onChange(() => {
+        c.left.height = c.right.height = c.height;
+        leftH?.updateDisplay();
+        rightH?.updateDisplay();
+        apply();
+      });
     folder.add(c, 'marginTop', 0, 30, 0.1).name('上マージン（画面高さ%）').onChange(apply);
     folder.add(c, 'marginLeft', 0, 30, 0.1).name('左マージン（画面幅%）').onChange(apply);
     folder.add(c, 'marginRight', 0, 30, 0.1).name('右マージン（画面幅%）').onChange(apply);
-    const left = folder.addFolder('左ロゴ オフセット（px）');
-    left.add(c.left, 'offsetX', -300, 300, 1).name('左右（X）').onChange(apply);
-    left.add(c.left, 'offsetY', -300, 300, 1).name('上下（Y）').onChange(apply);
-    const right = folder.addFolder('右ロゴ オフセット（px）');
-    right.add(c.right, 'offsetX', -300, 300, 1).name('左右（X）').onChange(apply);
-    right.add(c.right, 'offsetY', -300, 300, 1).name('上下（Y）').onChange(apply);
+    const left = folder.addFolder('左ロゴ（サイズ・オフセット）');
+    leftH = left.add(c.left, 'height', 1, 30, 0.1).name('高さ（画面高さ%）').onChange(apply);
+    left.add(c.left, 'offsetX', -300, 300, 1).name('左右（X・px）').onChange(apply);
+    left.add(c.left, 'offsetY', -300, 300, 1).name('上下（Y・px）').onChange(apply);
+    const right = folder.addFolder('右ロゴ（サイズ・オフセット）');
+    rightH = right.add(c.right, 'height', 1, 30, 0.1).name('高さ（画面高さ%）').onChange(apply);
+    right.add(c.right, 'offsetX', -300, 300, 1).name('左右（X・px）').onChange(apply);
+    right.add(c.right, 'offsetY', -300, 300, 1).name('上下（Y・px）').onChange(apply);
   }
 
   /**
@@ -593,8 +608,15 @@ export class Editor {
     this.visible ? this._hide() : this._show();
   }
 
+  /** 調整パネル（lil-gui）だけを表示/非表示する。エディタの状態は変えない。 */
+  _togglePanel() {
+    this._panelHidden = !this._panelHidden;
+    this.gui.domElement.style.display = this._panelHidden ? 'none' : '';
+  }
+
   _show() {
     this.visible = true;
+    this._panelHidden = false; // 再表示時は必ずパネルを出す（f で畳んだ状態を持ち越さない）
     this.gui.show();
     document.body.classList.add('editor-active');
     // アクティブタブに応じてプレビューを起動（生成系なら Timeline ＋ 俯瞰＋パス編集、画面系なら DOM）
@@ -634,6 +656,16 @@ export class Editor {
 
   _handleKey(e) {
     if (!this.visible) return;
+    // f: 調整パネル（lil-gui）の表示/非表示。プレビューを遮らず確認するため。
+    // エディタ自体（プレビュー・Timeline）は開いたまま、左上のパネルだけ畳む。
+    if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // 数値入力などにフォーカス中は通常のテキスト入力として扱う
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      this._togglePanel();
+      return;
+    }
     if (!(e.metaKey || e.ctrlKey)) return;
     if (e.key === 'z' || e.key === 'Z') {
       e.preventDefault();

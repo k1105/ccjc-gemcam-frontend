@@ -110,12 +110,14 @@ export class Editor {
     const generateFolder = this.gui.addFolder('生成');
     generateFolder.add({ timeline: () => this.timeline.toggle() }, 'timeline').name('🎬 Timeline 表示/非表示');
     buildGuiFromObject(generateFolder, choreo.data.generate, {
-      skipKeys: ['path', 'particles', 'times', 'lights', 'sounds'], // パス/時刻/ライト/音は専用UIで編集
+      // パス/時刻/ライト/音は専用UI、bottleRotation は度数の専用フォルダで編集
+      skipKeys: ['path', 'particles', 'times', 'lights', 'sounds', 'bottleRotation'],
       onChange: () => {
         this.timeline.invalidate();
         touch();
       },
     });
+    this._buildBottleRotationFolder(generateFolder, touch);
 
     // リザルト（RESULT）: フェードイン / スタガー / 滞留 / アウトロ
     const resultFolder = this.gui.addFolder('リザルト');
@@ -172,6 +174,42 @@ export class Editor {
       リザルト: resultFolder,
     });
     this._building = false;
+  }
+
+  /**
+   * 生成のターゲットボトルの向き（度）を飲料ごとに調整する。pullBack で各飲料が
+   * 正面を向くよう個別に合わせる。値は choreo.data.generate.bottleRotation に
+   * { [slug]: [X,Y,Z]（度） } で保持。編集中、その飲料が Timeline プレビューに
+   * 表示されていればラジアン変換して即反映する（リベイク不要）。
+   */
+  _buildBottleRotationFolder(parent, touch) {
+    const { choreo, brands } = this.ctx;
+    const gcfg = choreo.data.generate;
+    // 旧形式（単一配列）や未設定は飲料別マップへ移行
+    let cfg = gcfg.bottleRotation;
+    if (!cfg || Array.isArray(cfg)) cfg = gcfg.bottleRotation = {};
+    const folder = parent.addFolder('ボトルの向き（飲料別・度）');
+    for (const brand of brands.list) {
+      const rot = (cfg[brand.slug] ??= [0, 0, 0]); // 未設定はゼロ（見た目据え置き）
+      const apply = () => {
+        const stage = this.timeline.stage;
+        // 編集中の飲料がプレビュー表示中のときだけ即反映
+        if (stage?.bottle && stage.brand?.slug === brand.slug) {
+          stage.bottle.rotation.set(
+            (rot[0] * Math.PI) / 180,
+            (rot[1] * Math.PI) / 180,
+            (rot[2] * Math.PI) / 180
+          );
+        }
+        touch();
+      };
+      const sub = folder.addFolder(brand.label ?? brand.slug);
+      sub.add(rot, 1, -180, 180, 1).name('Y（左右の正面向き）').onChange(apply);
+      sub.add(rot, 0, -180, 180, 1).name('X（前後の傾き）').onChange(apply);
+      sub.add(rot, 2, -180, 180, 1).name('Z（左右の傾き）').onChange(apply);
+      sub.close();
+    }
+    folder.close();
   }
 
   /**

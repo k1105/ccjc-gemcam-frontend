@@ -101,6 +101,11 @@ export class GenerateSequence extends Sequence {
       if (this.bag.disposed) return;
       model.position.copy(bottlePos);
       model.scale.setScalar(BOTTLE_SCALE);
+      // pullBack で正面に見せたい向き（度）。飲料ごとに違うのでブランド別に保持。
+      // エディタ「生成 > ボトルの向き（飲料別）」で調整。未設定は [0,0,0]。
+      const map = gcfg.bottleRotation;
+      const rot = (map && !Array.isArray(map) ? map[brand.slug] : null) ?? [0, 0, 0];
+      model.rotation.set(...rot.map((d) => (d * Math.PI) / 180));
       world.scene.add(model);
       this.bottle = model;
     });

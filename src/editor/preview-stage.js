@@ -132,6 +132,10 @@ export class PreviewStage {
     const gcfg = choreo.data.generate;
     model.position.set(...gcfg.bottlePos);
     model.scale.setScalar(gcfg.bottleScale ?? 1.6);
+    // 本番（generate.enter）と同じ向き。飲料ごとに保持し度数→ラジアン変換して反映。
+    const map = gcfg.bottleRotation;
+    const rot = (map && !Array.isArray(map) ? map[brand.slug] : null) ?? [0, 0, 0];
+    model.rotation.set(...rot.map((d) => (d * Math.PI) / 180));
     world.scene.add(model);
     this.bottle = model;
   }

@@ -556,7 +556,59 @@
         "volume": 0.1,
         "enabled": true
       }
-    ]
+    ],
+    "bottleRotation": {
+      "coca-cola": [
+        0,
+        -97,
+        0
+      ],
+      "coca-cola-zero": [
+        0,
+        -94,
+        0
+      ],
+      "ilohas": [
+        0,
+        0,
+        0
+      ],
+      "aquarius": [
+        0,
+        -48,
+        0
+      ],
+      "yakan-no-mugicha": [
+        0,
+        0,
+        0
+      ],
+      "sprite": [
+        0,
+        28,
+        0
+      ],
+      "ayataka": [
+        0,
+        -48,
+        0
+      ],
+      "georgia": [
+        0,
+        46,
+        0
+      ],
+      "soken-bicha": [
+        0,
+        -45,
+        0
+      ],
+      "toreta": [
+        0,
+        -70,
+        0
+      ]
+    }
   },
   "result": {
     "imageFadeIn": 0.9,

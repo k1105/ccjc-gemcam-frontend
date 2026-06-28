@@ -5,7 +5,7 @@ import { SoundEditor } from './sound-editor.js';
 import { ScreenPreview } from './screen-preview.js';
 import { BottleEditor } from './bottle-editor.js';
 import { exportChoreo, importChoreo, importGrainImage, pickSkyImage } from './io.js';
-import { setGlassConfig, refreshGlassMaterials } from '../world/bottle-factory.js';
+import { setGlassConfig, refreshGlassMaterials, setBrandPlaneConfig, refreshBrandPlaneMaterials } from '../world/bottle-factory.js';
 
 /** タブ名 → 画面プレビュー種別。これ以外（生成/Camera/Lights/Particles/Env）は生成ルック編集 */
 const SCREEN_TABS = { 待機: 'select', 撮影: 'shoot', リザルト: 'result' };
@@ -90,6 +90,7 @@ export class Editor {
     // gradient（上端の影）は色・不透明度・長さに最適化した専用UIで編集する
     buildGuiFromObject(selectFolder, choreo.data.select, { onChange: onTuned, skipKeys: ['overrides', 'gradient'] });
     this._buildGradientFolder(selectFolder, onTuned);
+    this._buildBrandLightFolder(selectFolder); // スイープ光・商品板の陰影
 
     // 飲料 個別調整: 待機プレビュー中にキャンバスのボトルをクリックして編集
     this.bottleEditor = new BottleEditor(this.ctx, {
@@ -276,6 +277,43 @@ export class Editor {
       .add(scene.glass, 'envMapIntensity', 0, 4, 0.05)
       .name('映り込み強度')
       .onChange(applyGlass);
+  }
+
+  /**
+   * 待機画面 商品板の陰影フォルダ。左右に往復するスイープ光（待機シーケンスが
+   * scene.brandLight を毎フレーム参照）と、板マテリアル（明るさ/光沢/凹凸）の調整。
+   * 待機プレビュー中はライブ反映する。
+   */
+  _buildBrandLightFolder(parent) {
+    const { choreo, world } = this.ctx;
+    const scene = choreo.data.scene;
+    const touch = () => this._touch();
+    const bl = (scene.brandLight ??= {
+      sweepEnabled: true, baseDim: 0.4, sweepIntensity: 8, sweepRange: 2.5, sweepAmplitude: 2.2, sweepPeriod: 5,
+      sweepHeight: -0.3, sweepDistance: 2.9,
+      planeBrightness: 0.32, planeEnvIntensity: 0.25, planeRoughness: 0.62, planeNormalScale: 1.8,
+    });
+    // スイープ光は待機シーケンスが bl を毎フレーム参照するので値の反映は自動。
+    // 板マテリアルは生成済みなので明示的に再適用する。
+    const applyPlane = () => {
+      setBrandPlaneConfig(bl);
+      refreshBrandPlaneMaterials(world.scene);
+      touch();
+    };
+    const folder = parent.addFolder('スイープ光・板の陰影');
+    folder.add(bl, 'sweepEnabled').name('スイープ光 有効').onChange(touch);
+    folder.add(bl, 'baseDim', 0, 1, 0.01).name('ベース照明（待機・小=暗い）').onChange(touch);
+    folder.add(bl, 'sweepIntensity', 0, 20, 0.1).name('スイープ光 強さ').onChange(touch);
+    folder.add(bl, 'sweepRange', 0, 8, 0.1).name('照らす範囲（小=局所的）').onChange(touch);
+    folder.add(bl, 'sweepAmplitude', 0, 5, 0.05).name('移動範囲（左右・端まで）').onChange(touch);
+    folder.add(bl, 'sweepPeriod', 0.5, 20, 0.1).name('左→右にかかる秒数（大=ゆっくり）').onChange(touch);
+    folder.add(bl, 'sweepHeight', -2, 3, 0.05).name('光の高さ').onChange(touch);
+    folder.add(bl, 'sweepDistance', 0, 6, 0.05).name('光の前後位置（板の手前）').onChange(touch);
+    folder.add(bl, 'planeBrightness', 0, 1, 0.01).name('板の明るさ（小=暗い）').onChange(applyPlane);
+    folder.add(bl, 'planeEnvIntensity', 0, 2, 0.01).name('板の映り込み強度').onChange(applyPlane);
+    folder.add(bl, 'planeRoughness', 0, 1, 0.01).name('板の粗さ（小=光沢）').onChange(applyPlane);
+    folder.add(bl, 'planeNormalScale', 0, 4, 0.05).name('凹凸の強さ').onChange(applyPlane);
+    folder.close();
   }
 
   /**
@@ -517,6 +555,9 @@ export class Editor {
       this.ctx.environment.applySky?.(sc.sky);
       setGlassConfig(sc.glass);
       refreshGlassMaterials(this.ctx.world.scene);
+      // 商品板（スイープ光は bl を毎フレーム参照するので自動。板マテリアルは再適用が要る）
+      setBrandPlaneConfig(sc.brandLight);
+      refreshBrandPlaneMaterials(this.ctx.world.scene);
     }
     this.soundEditor.refresh(); // sounds 配列の増減を GUI に反映
     this.timeline.invalidate();

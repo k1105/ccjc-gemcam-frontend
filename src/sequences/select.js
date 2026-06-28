@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag } from '../core/resources.js';
 import { playSfx } from '../core/audio.js';
@@ -9,7 +10,7 @@ import { playSfx } from '../core/audio.js';
  */
 export class SelectSequence extends Sequence {
   async enter(payload = {}) {
-    const { world, overlay, keyboard, brands, choreo, bottleRack } = this.ctx;
+    const { world, overlay, keyboard, brands, choreo, bottleRack, environment } = this.ctx;
     this.bag = new TimerBag();
     this.selecting = false;
 
@@ -40,8 +41,38 @@ export class SelectSequence extends Sequence {
       });
     }
 
-    // lookAt 維持（カメラは固定。ドリフトは廃止）
-    this.tick = () => {
+    // 待機画面 専用のスイープ光: 商品板の手前を左→右へ実際に移動する点光源。
+    // 位置で照らすので、各板が光の通過に合わせて順に明るくなる（PointLight=距離で減衰）。
+    // この画面でだけ効かせたいので SELECT の enter/exit でライフサイクル管理する
+    //（他画面=SHOOT/GENERATE/RESULT には足さない）。設定は scene.brandLight を毎フレーム参照。
+    const bl = choreo.data.scene.brandLight ?? {};
+    // PointLight(色, 強さ, 届く距離=減衰カットオフ, decay)。decay=2 で物理的な 1/d² 減衰。
+    this.sweepLight = new THREE.PointLight(0xffffff, bl.sweepIntensity ?? 8, bl.sweepRange ?? 2.5, 2);
+    this.sweepLight.position.set(0, bl.sweepHeight ?? -0.3, bl.sweepDistance ?? 2.9);
+    world.scene.add(this.sweepLight);
+
+    // 待機中はベース照明（key/fill/rim/hemi）を絞ってスイープ光を主役にする。
+    // 常時強い一様光があると動くライトが埋もれて「動いて見えない」ため。
+    // 元の強さを控えておき、毎フレーム baseDim 係数で反映（exit で復元）。
+    this._baseLights = environment?.lights ? Object.values(environment.lights) : [];
+    this._baseIntensities = this._baseLights.map((l) => l.intensity);
+
+    // lookAt 維持（カメラは固定。ドリフトは廃止）＋ スイープ光を左→右へ走らせる
+    this.tick = (_dt, elapsed) => {
+      const c = choreo.data.scene.brandLight ?? {};
+      // ベース照明を待機用に絞る（原値×係数なのでスライダーが即反映）
+      const dim = c.baseDim ?? 0.4;
+      this._baseLights.forEach((l, i) => { l.intensity = this._baseIntensities[i] * dim; });
+      const light = this.sweepLight;
+      light.visible = c.sweepEnabled !== false;
+      light.intensity = c.sweepIntensity ?? 8;
+      light.distance = c.sweepRange ?? 2.5; // 0=無限。範囲を絞るほど局所的に照らす
+      const amp = c.sweepAmplitude ?? 2.2;
+      const period = c.sweepPeriod ?? 5;
+      // phase 0→1 を繰り返し、X を左(-amp)→右(+amp)へ直線移動（右端で左へ戻る）。
+      // ラック幅より広く振らせ、両端では板の射程外に出るので戻りの瞬間が目立たない。
+      const phase = (((elapsed / period) % 1) + 1) % 1;
+      light.position.set(-amp + 2 * amp * phase, c.sweepHeight ?? -0.3, c.sweepDistance ?? 2.9);
       if (world.cameraLocked) return; // タイムラインプレビュー中はカメラを明け渡す
       world.camera.lookAt(camCfg.look[0], camCfg.look[1], camCfg.look[2]);
     };
@@ -93,6 +124,17 @@ export class SelectSequence extends Sequence {
     keyboard.clearHandler();
     overlay.hideSelectGradient();
     if (this.tick) world.removeTickable(this.tick);
+    // 待機専用スイープ光を撤去（他画面に持ち込まない）
+    if (this.sweepLight) {
+      world.scene.remove(this.sweepLight);
+      this.sweepLight.dispose();
+      this.sweepLight = null;
+    }
+    // 絞っていたベース照明を元の強さへ戻す（他画面へ持ち越さない）
+    if (this._baseLights) {
+      this._baseLights.forEach((l, i) => { l.intensity = this._baseIntensities[i]; });
+      this._baseLights = null;
+    }
     this.bag.disposeAll();
   }
 }

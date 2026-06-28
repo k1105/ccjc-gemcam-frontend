@@ -664,6 +664,20 @@
       "image": "",
       "intensity": 1,
       "blurriness": 0
+    },
+    "brandLight": {
+      "sweepEnabled": true,
+      "baseDim": 0.4,
+      "sweepIntensity": 8,
+      "sweepRange": 2.5,
+      "sweepAmplitude": 2.2,
+      "sweepPeriod": 5,
+      "sweepHeight": -0.3,
+      "sweepDistance": 2.9,
+      "planeBrightness": 0.32,
+      "planeEnvIntensity": 0.25,
+      "planeRoughness": 0.62,
+      "planeNormalScale": 1.8
     }
   },
   "sfx": {

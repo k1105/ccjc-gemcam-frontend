@@ -10,8 +10,8 @@ import { Webcam } from './core/webcam.js';
 import { ApiService } from './api.js';
 import { Overlay } from './ui/overlay.js';
 import { createEnvironment } from './world/environment.js';
-import { preloadAllSfx } from './core/audio.js';
-import { setGlassConfig } from './world/bottle-factory.js';
+import { preloadAllSfx, preloadGenerateSounds } from './core/audio.js';
+import { setGlassConfig, setBrandPlaneConfig } from './world/bottle-factory.js';
 import { BottleRack } from './world/bottle-rack.js';
 import { SelectSequence } from './sequences/select.js';
 import { ShootSequence } from './sequences/shoot.js';
@@ -28,8 +28,9 @@ async function boot() {
   const director = new CameraDirector(world.camera, world);
   const api = import.meta.env.VITE_MOCK === '1' ? new MockApiService() : new ApiService();
 
-  // ガラスマテリアルの見え方はボトル生成より前に確定させる（ロード時に適用されるため）
+  // ガラス/商品板マテリアルの見え方はボトル生成より前に確定させる（ロード時に適用されるため）
   setGlassConfig(choreo.data.scene.glass);
+  setBrandPlaneConfig(choreo.data.scene.brandLight);
   const environment = createEnvironment(world.scene, choreo.data.scene.fog, choreo.data.scene.sky);
   world.setupPostFX(choreo.data.scene.postfx);
 
@@ -103,6 +104,7 @@ async function boot() {
   });
 
   preloadAllSfx(choreo); // 効果音サンプルを事前ロード（初回再生のもたつき防止）
+  preloadGenerateSounds(choreo); // GENERATE の炭酸/泡サンプルも温める（初回発火の遅延防止）
 
   await manager.go('select');
   window.app = { ctx }; // デバッグ用フック

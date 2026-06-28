@@ -109,6 +109,47 @@ export async function createBottle(brand) {
  */
 const texLoader = new THREE.TextureLoader();
 
+// 商品板（MeshStandardMaterial）の見え方設定。色を白(1.0)等倍のままだと受光で
+// 白飛びするため、アルベドを下げて全体を一段暗くする。IBL(envMap)の寄与も絞る。
+// roughness を少し下げるとスイープ光のハイライトが板の上を流れて陰影が動いて見える。
+// choreo.data.scene.brandLight の値を main 起動時に setBrandPlaneConfig() で流し込む。
+const brandPlaneConfig = {
+  brightness: 0.32, // アルベド（リニア。1=明るい / 小さいほど暗い）
+  envMapIntensity: 0.25, // 環境マップ（IBL）の寄与。小さいほど暗く締まる
+  roughness: 0.62, // 小さいほど光沢が出てハイライトが動いて見える
+  normalScale: 1.8, // ノーマルマップの凹凸の強さ
+};
+
+// choreo.data.scene.brandLight（plane* キー）→ brandPlaneConfig へ取り込む
+export function setBrandPlaneConfig(cfg) {
+  if (!cfg) return;
+  if (cfg.planeBrightness != null) brandPlaneConfig.brightness = cfg.planeBrightness;
+  if (cfg.planeEnvIntensity != null) brandPlaneConfig.envMapIntensity = cfg.planeEnvIntensity;
+  if (cfg.planeRoughness != null) brandPlaneConfig.roughness = cfg.planeRoughness;
+  if (cfg.planeNormalScale != null) brandPlaneConfig.normalScale = cfg.planeNormalScale;
+}
+
+// 1マテリアルへ現在の brandPlaneConfig を適用する
+function applyBrandPlaneConfig(mat) {
+  mat.color.setScalar(brandPlaneConfig.brightness); // リニア空間で直接アルベドを下げる
+  mat.envMapIntensity = brandPlaneConfig.envMapIntensity;
+  mat.roughness = brandPlaneConfig.roughness;
+  mat.normalScale?.set(brandPlaneConfig.normalScale, brandPlaneConfig.normalScale);
+  mat.needsUpdate = true;
+}
+
+/**
+ * シーン配下の全商品板マテリアルへ brandPlaneConfig を再適用する。
+ * エディタからのライブ調整で使う（既に生成済みの板へ反映）。
+ */
+export function refreshBrandPlaneMaterials(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) if (m?.userData?.isBrandPlane) applyBrandPlaneConfig(m);
+  });
+}
+
 export async function createBottlePlane(brand) {
   // brands.json の productImage は "public/brands/xxx.png"。public 配下は Vite がルート配信する
   const imgUrl = '/' + brand.productImage.replace(/^\/?public\//, '');
@@ -118,9 +159,11 @@ export async function createBottlePlane(brand) {
     tex.anisotropy = 4;
 
     // 背景が不透明な商品画像（例: Aquarius / Ayataka）には、別途用意した
-    // シルエットのアルファマップ "{name}-alpha.png" で切り抜きをかける。
+    // シルエットのアルファマップ "alpha/{name}-alpha.png" で切り抜きをかける。
     // 用意が無いブランドは 404 になるので、その場合は黙って従来どおり map のαに任せる。
     const alphaMap = await loadAlphaMap(imgUrl);
+    // 正方形のノーマルマップ "normal/{name}.png"。あればライティングで凹凸を出す。
+    const normalMap = await loadNormalMap(imgUrl);
 
     const img = tex.image;
     const aspect = img.width > 0 && img.height > 0 ? img.width / img.height : 1;
@@ -129,17 +172,33 @@ export async function createBottlePlane(brand) {
     const height = TARGET_HEIGHT;
     const width = height * aspect;
 
+    // ノーマルマップは正方形なので、縦長の板へは「高さ合わせ・中央寄せ」で貼る。
+    // v（高さ）は全域 0..1、u（幅）は板のアスペクト比ぶんだけ中央から切り出す。
+    if (normalMap) {
+      normalMap.wrapS = THREE.ClampToEdgeWrapping;
+      normalMap.wrapT = THREE.ClampToEdgeWrapping;
+      normalMap.repeat.set(aspect, 1);
+      normalMap.offset.set((1 - aspect) / 2, 0);
+      normalMap.needsUpdate = true;
+    }
+
     const geo = new THREE.PlaneGeometry(width, height);
     geo.translate(0, height / 2, 0); // 原点を下端中心へ
     // 透過PNG前提: 完全透明な背景は alphaTest で破棄し、半透明エッジは blend で残す。
     // 回さない（常に正面）ので片面描画でよい。
-    const mat = new THREE.MeshBasicMaterial({
+    // ノーマルマップを効かせるためライティングを受ける MeshStandardMaterial を使う
+    // （色はテクスチャそのままに見えるよう roughness=1 / metalness=0）。
+    const mat = new THREE.MeshStandardMaterial({
       map: tex,
       alphaMap,
+      normalMap,
       transparent: true,
       alphaTest: 0.1,
       side: THREE.FrontSide,
+      metalness: 0,
     });
+    mat.userData.isBrandPlane = true; // refreshBrandPlaneMaterials の対象印
+    applyBrandPlaneConfig(mat); // 明るさ/roughness/envMap/normalScale を適用
     const mesh = new THREE.Mesh(geo, mat);
 
     const root = new THREE.Group();
@@ -153,17 +212,45 @@ export async function createBottlePlane(brand) {
 }
 
 /**
- * 商品画像 URL から "{name}-alpha.png" を導出してアルファマップを読む。
+ * 商品画像 URL "{dir}/{name}.{ext}" の {dir} と {name} を取り出す。
+ */
+function splitBrandImage(imgUrl) {
+  const slash = imgUrl.lastIndexOf('/');
+  const dir = imgUrl.slice(0, slash); // 例: "/brands"
+  const base = imgUrl.slice(slash + 1).replace(/\.[^.]+$/, ''); // 例: "coca-cola"
+  return { dir, base };
+}
+
+/**
+ * 商品画像 URL から "{dir}/alpha/{name}-alpha.png" を導出してアルファマップを読む。
  * alphaMap は輝度（白=不透明 / 黒=透明）を α として使うデータテクスチャなので、
  * sRGB ではなくリニア（NoColorSpace）で扱う。未用意のブランドは 404 → null。
  */
 async function loadAlphaMap(imgUrl) {
-  const alphaUrl = imgUrl.replace(/\.[^./]+$/, '-alpha.png');
+  const { dir, base } = splitBrandImage(imgUrl);
+  const alphaUrl = `${dir}/alpha/${base}-alpha.png`;
   try {
     const alpha = await texLoader.loadAsync(alphaUrl);
     alpha.colorSpace = THREE.NoColorSpace;
     alpha.anisotropy = 4;
     return alpha;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 商品画像 URL から "{dir}/normal/{name}.png" を導出してノーマルマップを読む。
+ * 法線データはリニア（NoColorSpace）で扱う。未用意のブランドは 404 → null。
+ */
+async function loadNormalMap(imgUrl) {
+  const { dir, base } = splitBrandImage(imgUrl);
+  const normalUrl = `${dir}/normal/${base}.png`;
+  try {
+    const normal = await texLoader.loadAsync(normalUrl);
+    normal.colorSpace = THREE.NoColorSpace;
+    normal.anisotropy = 4;
+    return normal;
   } catch {
     return null;
   }

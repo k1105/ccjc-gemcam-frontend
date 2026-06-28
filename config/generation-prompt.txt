@@ -15,3 +15,5 @@ Each character: full body head to toe, one head and face, normal limbs, fully cl
 
 Layout: square 1:1, composed for visual balance — the bottle need NOT be dead-centre. Keep the bottle a consistent size (about 75% of the image height) and arrange the character(s) in relation to it.
 Background: present the subjects as a clean cut-out / e-commerce packshot, isolated on a flat, perfectly uniform pure-white #ffffff fill — like an alpha matte / clipping path. The white is a single solid fill, NOT a lit surface: no gradient, gray, off-white, shadow, floor, texture, or text. Keep crisp clean edges around the subjects. Bright commercial studio lighting on the subjects only.
+
+{brand_fragment}

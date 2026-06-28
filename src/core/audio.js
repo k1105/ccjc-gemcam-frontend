@@ -90,18 +90,34 @@ export function preloadSound(def = {}) {
   if (kind && kind !== 'beep') loadBuffer(resolveUrl(kind)).catch(() => {});
 }
 
-/** サンプル音源を1発再生（ロード失敗時は beep にフォールバック） */
-function playBuffer(url, { volume } = {}) {
+/** サンプル音源のフェード既定（クリックノイズ防止の短いイン/アウト、秒） */
+export const SAMPLE_FADE_DEFAULTS = { fadeIn: 0.008, fadeOut: 0.015 };
+
+/** サンプル音源を1発再生（ロード失敗時は beep にフォールバック）。
+ * 頭/尻のクリックノイズ防止に短いフェードイン/アウトのエンベロープを掛ける。 */
+function playBuffer(url, { volume, fadeIn, fadeOut } = {}) {
   const ac = audioCtx();
   if (!ac) return;
   loadBuffer(resolveUrl(url))
     .then((buffer) => {
       const src = ac.createBufferSource();
       const gain = ac.createGain();
-      gain.gain.value = volume ?? 1.0;
+      const vol = volume ?? 1.0;
       src.buffer = buffer;
       src.connect(gain).connect(ac.destination);
-      src.start();
+
+      // フェード尺はバッファ長を超えないようにクランプ（極短サンプルでも破綻しない）
+      const dur = buffer.duration;
+      const fIn = Math.min(fadeIn ?? SAMPLE_FADE_DEFAULTS.fadeIn, dur * 0.5);
+      const fOut = Math.min(fadeOut ?? SAMPLE_FADE_DEFAULTS.fadeOut, dur * 0.5);
+      const now = ac.currentTime;
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(vol, now + fIn);
+      gain.gain.setValueAtTime(vol, now + Math.max(dur - fOut, fIn));
+      gain.gain.linearRampToValueAtTime(0, now + dur);
+
+      src.start(now);
+      src.stop(now + dur);
       src.onended = () => {
         src.disconnect();
         gain.disconnect();
@@ -122,7 +138,7 @@ function playBuffer(url, { volume } = {}) {
 export function playSound(def = {}) {
   const kind = def.sound ?? 'beep';
   if (kind === 'beep') playBeep(def);
-  else playBuffer(kind, { volume: def.volume ?? 1.0 });
+  else playBuffer(kind, { volume: def.volume ?? 1.0, fadeIn: def.fadeIn, fadeOut: def.fadeOut });
 }
 
 /**
@@ -142,4 +158,15 @@ export function preloadAllSfx(choreo) {
   const sfx = choreo?.data?.sfx;
   if (!sfx) return;
   for (const def of Object.values(sfx)) preloadSound(def);
+}
+
+/**
+ * GENERATE の音響レイヤー（generate.sounds）のサンプルを事前ロードして温める。
+ * sfx と違い、これらは SoundScheduler が絶対秒で発火するため初回ロードが遅れると
+ * 発音が start から後ろにずれる（炭酸/泡の音が断続的に聞こえる原因）。本番開始前に1回呼ぶ。
+ */
+export function preloadGenerateSounds(choreo) {
+  const sounds = choreo?.data?.generate?.sounds;
+  if (!Array.isArray(sounds)) return;
+  for (const def of sounds) preloadSound(def);
 }

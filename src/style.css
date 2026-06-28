@@ -80,6 +80,29 @@ body.editor-active * {
   letter-spacing: 0.1em;
 }
 
+/* --- SHOOT 生成領域の可視化（デバッグ専用）。領域外を暗幕で覆い、クロップ範囲を示す --- */
+#shoot-region {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #2c6cff;
+  /* 領域外を一様に暗くして「ここが切り出される」ことを示す（要素外へ広がる影） */
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+#shoot-region .region-label {
+  position: absolute;
+  top: -24px;
+  left: -2px;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #2c6cff;
+  font: 12px/1.2 "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+
 /* --- SHOOT viewfinder frame + center crosshair --- */
 #shoot-frame {
   position: absolute;

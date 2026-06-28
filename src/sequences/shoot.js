@@ -2,6 +2,7 @@ import gsap from 'gsap';
 import { Sequence } from '../core/sequence-manager.js';
 import { TimerBag } from '../core/resources.js';
 import { playSfx } from '../core/audio.js';
+import { normalizeRegion } from '../core/region.js';
 
 /**
  * SHOOT: 3Dシーンからカメラ映像へクロスフェードでシームレスに切り替わる。
@@ -9,8 +10,10 @@ import { playSfx } from '../core/audio.js';
  * Webカメラは SELECT の沈下アニメ中にウォームアップ済み（core/webcam.js）。
  *
  * 撮影時に2枚キャプチャする:
- *  - apiSnapshot: 640x480（バックエンド契約用、ミラー済み）
- *  - displaySnapshot: 画面アスペクト・cover crop・ミラー一致（GENERATE の写真平面用）
+ *  - apiSnapshot: 生成APIへ送るインプット。表示フレームを生成領域（shoot.region）で
+ *    切り出したもの（ミラー済み）。領域はデバッグエディタの撮影タブで編集・可視化できる。
+ *  - displaySnapshot: 画面アスペクト・cover crop・ミラー一致（GENERATE の写真平面／
+ *    パーティクル演出用。こちらは全画面フレームをそのまま使う）
  */
 export class ShootSequence extends Sequence {
   async enter(payload = {}) {
@@ -22,6 +25,7 @@ export class ShootSequence extends Sequence {
     const screen = overlay.screens.shoot;
     overlay.hideAll();
     overlay.hideCountdown();
+    overlay.hideShootRegion(); // 生成領域ボックスはデバッグ専用。本番では出さない
     // 色帯ワイプ経由なら帯が画面を覆っている裏で即表示（帯が捲れてカメラが現れる）
     gsap.set(screen, { opacity: payload.fromWipe ? 1 : 0 });
     gsap.set(overlay.shootCaption, { opacity: 0 });
@@ -113,26 +117,21 @@ export class ShootSequence extends Sequence {
   }
 
   /**
-   * video から API用 640x480 と 表示用（画面アスペクト）の2枚を canvas へ描き込む（drawImage のみ）。
-   * PNG エンコード等の重い処理は呼び出し側が白フラッシュ裏で行う。
+   * video から表示用（画面アスペクト・全画面）と API用（生成領域でクロップ）の2枚を
+   * canvas へ描き込む（drawImage のみ）。PNG エンコード等の重い処理は呼び出し側が
+   * 白フラッシュ裏で行う。
+   *
+   * apiCanvas は dispCanvas（＝画面に出ているミラー済み cover フレーム）から
+   * 生成領域 region を切り出して作る。dispCanvas は画面表示そのものなので、
+   * 領域の正規化矩形がデバッグの可視化ボックスとそのまま一致する。
    * @returns {{apiCanvas: HTMLCanvasElement, dispCanvas: HTMLCanvasElement}}
    */
   _grabFrames(overlay) {
     const video = overlay.video;
     const hasVideo = this.ctx.webcam.stream && video.readyState >= video.HAVE_CURRENT_DATA;
 
-    // --- API用 640x480（ミラー） ---
-    const apiCanvas = document.createElement('canvas');
-    apiCanvas.width = 640;
-    apiCanvas.height = 480;
-    const apiCtx = apiCanvas.getContext('2d');
-    if (hasVideo) {
-      drawCover(apiCtx, video, 640, 480, true);
-    } else {
-      drawPlaceholder(apiCtx, 640, 480);
-    }
-
-    // --- 表示用 画面アスペクト（ミラー、object-fit:cover と同一クロップ） ---
+    // --- 表示用 画面アスペクト（ミラー、object-fit:cover と同一クロップ）。
+    //     パーティクル演出・写真平面はこの全画面フレームを使う。 ---
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const dispW = 1280;
@@ -146,6 +145,17 @@ export class ShootSequence extends Sequence {
     } else {
       drawPlaceholder(dispCtx, dispW, dispH);
     }
+
+    // --- 生成API用: 表示フレームを生成領域で切り出した画像（＝送信インプット） ---
+    const region = normalizeRegion(this.ctx.choreo.data.shoot.region);
+    const sx = Math.round(region.x * dispW);
+    const sy = Math.round(region.y * dispH);
+    const sw = Math.max(1, Math.round(region.w * dispW));
+    const sh = Math.max(1, Math.round(region.h * dispH));
+    const apiCanvas = document.createElement('canvas');
+    apiCanvas.width = sw;
+    apiCanvas.height = sh;
+    apiCanvas.getContext('2d').drawImage(dispCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
 
     return { apiCanvas, dispCanvas };
   }

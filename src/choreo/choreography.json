@@ -124,7 +124,13 @@
   },
   "shoot": {
     "countdownInterval": 1,
-    "postSnapDelay": 0.45
+    "postSnapDelay": 0.45,
+    "region": {
+      "x": 0.2,
+      "y": 0.08,
+      "w": 0.6,
+      "h": 0.84
+    }
   },
   "generate": {
     "particles": {

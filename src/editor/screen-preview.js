@@ -16,6 +16,7 @@ export class ScreenPreview {
     this.ctx = ctx;
     this.active = null; // 'select' | 'shoot' | 'result' | null
     this._animToken = 0; // 再生（replay）のキャンセル用トークン
+    this._webcamToken = 0; // 撮影プレビューのカメラ取得（非同期）のキャンセル用トークン
     this._tl = null; // 再生中の gsap タイムライン
     this._tick = this._tick.bind(this);
   }
@@ -44,6 +45,8 @@ export class ScreenPreview {
     this._stopAnim();
     const { overlay, world } = this.ctx;
     world.removeTickable(this._tick);
+    this._detachWebcam();
+    overlay.hideShootRegion();
     overlay.hideAll();
     overlay.hideSelectGradient();
     overlay.hideCountdown();
@@ -60,25 +63,29 @@ export class ScreenPreview {
   // ---- 静止プレビュー ----
 
   _showSelect() {
+    this._detachWebcam();
+    this.ctx.overlay.hideShootRegion();
     // 待機＝オーバーレイ無し。ボトルラックと上端グラデーションを見せる（カメラドリフトは SELECT tick が継続）
     this.ctx.bottleRack.setVisible(true);
     this.ctx.overlay.showSelectGradient(this.ctx.choreo.data.select.gradient);
   }
 
   _showShoot() {
-    const { overlay } = this.ctx;
+    const { overlay, choreo } = this.ctx;
     overlay.hideAll();
-    // Webカメラは掴まずプレースホルダ表示（編集中にカメラLEDを点けない）
-    overlay.video.classList.add('hidden');
-    overlay.video.srcObject = null;
-    overlay.videoPlaceholder.classList.remove('hidden');
     gsap.set(overlay.screens.shoot, { opacity: 1 });
     gsap.set(overlay.shootCaption, { opacity: 1 });
     overlay.show('shoot');
+    // 生成領域（API クロップ範囲）を可視化（デバッグ専用）
+    overlay.showShootRegion(choreo.data.shoot.region);
+    // デバイスのカメラ映像をライブ表示（取得できなければプレースホルダ）
+    this._attachWebcam();
   }
 
   _showResult() {
     const { overlay, brands } = this.ctx;
+    this._detachWebcam();
+    overlay.hideShootRegion();
     const els = overlay.result;
     const brand = brands.list[0];
     els.image.src = makeResultTestImage(1280, 1600);
@@ -170,6 +177,44 @@ export class ScreenPreview {
   _tick() {
     const { manager } = this.ctx;
     if (!manager.is('select') || manager.transitioning) this.hide();
+  }
+
+  /**
+   * デバイスのカメラを取得して撮影プレビューの video へライブ表示する。
+   * 取得は非同期なので、待っている間に別画面へ切り替わったら（トークン不一致）破棄する。
+   * webcam はシングルトン（core/webcam.js）でキャッシュされるため再取得は軽い。
+   */
+  async _attachWebcam() {
+    const { overlay, webcam } = this.ctx;
+    // 既にこのプレビュー用に表示中なら何もしない（replay 復帰時のちらつき防止）
+    if (overlay.video.srcObject && webcam.stream) return;
+    const token = ++this._webcamToken;
+    overlay.video.classList.add('hidden');
+    overlay.videoPlaceholder.classList.remove('hidden');
+    try {
+      const stream = await webcam.acquire();
+      if (token !== this._webcamToken) return; // 取得中に撤収/画面切替（解放は _detachWebcam が担う）
+      overlay.video.srcObject = stream;
+      overlay.video.classList.remove('hidden');
+      overlay.videoPlaceholder.classList.add('hidden');
+      await overlay.video.play?.().catch(() => {});
+    } catch (err) {
+      if (token !== this._webcamToken) return;
+      console.warn('[ScreenPreview] webcam unavailable, showing placeholder', err);
+      overlay.video.classList.add('hidden');
+      overlay.videoPlaceholder.classList.remove('hidden');
+    }
+  }
+
+  /** 撮影プレビューのカメラを解放して video をデタッチ（取得中の attach も無効化）。 */
+  _detachWebcam() {
+    const { overlay, webcam } = this.ctx;
+    this._webcamToken++; // 進行中の _attachWebcam を無効化
+    webcam.release();
+    overlay.video.pause?.();
+    overlay.video.srcObject = null;
+    overlay.video.classList.add('hidden');
+    overlay.videoPlaceholder.classList.remove('hidden');
   }
 
   /** gsap タイムラインを1本組んで再生し、尺ぶん待つ（キャンセルは token 側で判定） */

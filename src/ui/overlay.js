@@ -1,4 +1,5 @@
 import gsap from 'gsap';
+import { normalizeRegion } from '../core/region.js';
 
 /**
  * DOMオーバーレイ（SHOOT映像 / カウントダウン / RESULT要素 / フラッシュ）の薄いラッパ。
@@ -15,6 +16,7 @@ export class Overlay {
     this._wipeToken = 0; // brandWipeUp の世代トークン（reset 割り込み検出用）
     this.video = document.getElementById('webcam-video');
     this.videoPlaceholder = document.getElementById('webcam-placeholder');
+    this.shootRegion = document.getElementById('shoot-region');
     this.shootCaption = document.getElementById('shoot-caption');
     this.countdown = document.getElementById('countdown');
     this.flash = document.getElementById('flash-overlay');
@@ -229,6 +231,25 @@ export class Overlay {
   hideCountdown() {
     this.countdown.classList.add('hidden');
     this.countdown.classList.remove('tick');
+  }
+
+  /**
+   * 生成領域（API へ送るクロップ範囲）のボックスを撮影画面に重ねて可視化する。
+   * region は画面に対する正規化矩形 {x,y,w,h}（0..1）。デバッグ専用（本番は呼ばない）。
+   */
+  showShootRegion(region) {
+    const el = this.shootRegion;
+    if (!el) return;
+    const r = normalizeRegion(region);
+    el.style.left = `${r.x * 100}%`;
+    el.style.top = `${r.y * 100}%`;
+    el.style.width = `${r.w * 100}%`;
+    el.style.height = `${r.h * 100}%`;
+    el.classList.remove('hidden');
+  }
+
+  hideShootRegion() {
+    this.shootRegion?.classList.add('hidden');
   }
 
   /**

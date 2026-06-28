@@ -104,7 +104,9 @@ export class Editor {
     // 撮影（SHOOT）: カウントダウン間隔 / シャッター後ディレイ
     const shootFolder = this.gui.addFolder('撮影');
     shootFolder.add({ replay: () => this.screenPreview.replay() }, 'replay').name('⟳ カウントダウンを再生');
-    buildGuiFromObject(shootFolder, choreo.data.shoot, { onChange: touch });
+    // region は専用UI（撮影プレビューの可視化ボックスへライブ反映）で編集する
+    buildGuiFromObject(shootFolder, choreo.data.shoot, { onChange: touch, skipKeys: ['region'] });
+    this._buildShootRegionFolder(shootFolder, touch);
 
     // 生成（GENERATE）パラメータ: カメラ編成に効く値はタイムラインへ通知（path/particles/lights は専用サブタブ）
     const generateFolder = this.gui.addFolder('生成');
@@ -210,6 +212,27 @@ export class Editor {
       sub.close();
     }
     folder.close();
+  }
+
+  /**
+   * 撮影画面 生成領域（API へ送るクロップ範囲）の編集フォルダ。
+   * choreo.data.shoot.region（画面に対する正規化矩形 {x,y,w,h}）へバインドし、
+   * 撮影プレビュー表示中なら可視化ボックスへライブ反映する。
+   * パーティクル演出・写真平面は全画面フレームを使い、この領域はAPI送信画像のみに効く。
+   */
+  _buildShootRegionFolder(parent, touch) {
+    const { choreo, overlay } = this.ctx;
+    const r = (choreo.data.shoot.region ??= { x: 0.2, y: 0.08, w: 0.6, h: 0.84 });
+    const apply = () => {
+      // 撮影プレビュー中ならボックスを即更新
+      if (this.screenPreview?.active === 'shoot') overlay.showShootRegion(r);
+      touch();
+    };
+    const folder = parent.addFolder('生成領域（API送信のクロップ）');
+    folder.add(r, 'x', 0, 1, 0.005).name('左 X（画面幅に対する割合）').onChange(apply);
+    folder.add(r, 'y', 0, 1, 0.005).name('上 Y（画面高さに対する割合）').onChange(apply);
+    folder.add(r, 'w', 0.05, 1, 0.005).name('幅（画面幅に対する割合）').onChange(apply);
+    folder.add(r, 'h', 0.05, 1, 0.005).name('高さ（画面高さに対する割合）').onChange(apply);
   }
 
   /**
@@ -606,6 +629,10 @@ export class Editor {
     if (this.ctx.manager.is('select')) {
       this.ctx.bottleRack.applyLayout?.();
       this.ctx.overlay.showSelectGradient(this.ctx.choreo.data.select.gradient);
+    }
+    // 撮影プレビュー中なら生成領域ボックスも復元値へ追従させる
+    if (this.screenPreview?.active === 'shoot') {
+      this.ctx.overlay.showShootRegion(this.ctx.choreo.data.shoot.region);
     }
     this.bottleEditor.refresh(); // 個別オーバーライドの値変化を編集フォルダ・ボックスへ反映
     // 環境（fog/ガラス）もスナップショットへ追従させる（updateDisplay だけでは scene に反映されない）

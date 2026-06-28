@@ -273,14 +273,38 @@ body.editor-active * {
   opacity: 0;
 }
 
-/* 左上ロゴ（public/blk_next_chapter_of_growth.svg） */
-#result-logo {
+/* 上端ロゴ列（左: all_hands / 右: coca_cola_j_and_k）。
+   コンテナ自体は全幅。space-between で両端寄せ・flex-start で上揃え。
+   余白（上・左右）と各ロゴの微調整オフセットは CSS 変数で受け取り、
+   リザルトのデバッガー（overlay.applyResultLogos）から書き換える。
+   gsap はこのコンテナの transform(y)/opacity をアニメーションさせるため、
+   水平配置は transform ではなく flex + padding で行う。 */
+#result-logos {
   position: absolute;
-  left: 4.5vw;
-  top: 5.5vh;
-  height: 7vh;
-  width: auto;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  box-sizing: border-box;
+  padding-top: var(--logos-margin-top, 5.5vh);
+  padding-left: var(--logos-margin-left, 4.5vw);
+  padding-right: var(--logos-margin-right, 4.5vw);
   opacity: 0;
+  pointer-events: none;
+}
+.result-logo {
+  height: var(--logos-height, 7vh);
+  width: auto;
+  display: block;
+}
+/* 各ロゴの上下左右オフセット（px）。コンテナの gsap transform とは別要素なので競合しない。 */
+#result-logo-left {
+  transform: translate(var(--logo-left-x, 0px), var(--logo-left-y, 0px));
+}
+#result-logo-right {
+  transform: translate(var(--logo-right-x, 0px), var(--logo-right-y, 0px));
 }
 
 /*

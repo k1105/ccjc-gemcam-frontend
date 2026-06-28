@@ -23,9 +23,32 @@ export class Overlay {
     this.generateWaitLogo = document.getElementById('generate-wait-logo');
     this.result = {
       image: document.getElementById('result-image'),
-      logo: document.getElementById('result-logo'),
+      // logo はロゴ列のコンテナ（#result-logos）。gsap はこのコンテナをフェード/スライドさせる。
+      logo: document.getElementById('result-logos'),
       rect: document.getElementById('result-rect'),
     };
+  }
+
+  /**
+   * リザルト上端のロゴ列のレイアウトを choreo 設定から適用する。
+   * 余白（上・左右）と高さはコンテナへ、各ロゴの上下左右オフセットは
+   * CSS 変数として渡し（子要素の transform: translate に反映）、
+   * gsap が触るコンテナの transform とは別レイヤーで効かせる。
+   * cfg: { height, marginTop, marginLeft, marginRight, left:{offsetX,offsetY}, right:{offsetX,offsetY} }
+   */
+  applyResultLogos(cfg) {
+    const el = this.result.logo;
+    if (!el || !cfg) return;
+    const L = cfg.left ?? {};
+    const R = cfg.right ?? {};
+    el.style.setProperty('--logos-height', `${cfg.height ?? 7}vh`);
+    el.style.setProperty('--logos-margin-top', `${cfg.marginTop ?? 5.5}vh`);
+    el.style.setProperty('--logos-margin-left', `${cfg.marginLeft ?? 4.5}vw`);
+    el.style.setProperty('--logos-margin-right', `${cfg.marginRight ?? 4.5}vw`);
+    el.style.setProperty('--logo-left-x', `${L.offsetX ?? 0}px`);
+    el.style.setProperty('--logo-left-y', `${L.offsetY ?? 0}px`);
+    el.style.setProperty('--logo-right-x', `${R.offsetX ?? 0}px`);
+    el.style.setProperty('--logo-right-y', `${R.offsetY ?? 0}px`);
   }
 
   show(name) {

@@ -3,8 +3,8 @@
   "select": {
     "rack": {
       "spacing": 0.27,
-      "y": -0.75,
-      "z": 2.2,
+      "y": -0.63,
+      "z": 2.5,
       "idleSwayAmp": 0.018,
       "idleSwaySpeed": 0.9,
       "overrides": {
@@ -126,10 +126,10 @@
     "countdownInterval": 1,
     "postSnapDelay": 0.45,
     "region": {
-      "x": 0.2,
-      "y": 0.08,
-      "w": 0.6,
-      "h": 0.84
+      "x": 0.045,
+      "y": 0.045,
+      "w": 0.91,
+      "h": 0.91
     }
   },
   "generate": {
@@ -656,6 +656,20 @@
       "holdFull": 0.15,
       "settleDuration": 0.9,
       "settleEase": "power3.inOut"
+    },
+    "logos": {
+      "height": 4.6,
+      "marginTop": 6.2,
+      "marginLeft": 5,
+      "marginRight": 5,
+      "left": {
+        "offsetX": 0,
+        "offsetY": 0
+      },
+      "right": {
+        "offsetX": 0,
+        "offsetY": 0
+      }
     }
   },
   "scene": {
@@ -701,16 +715,16 @@
     },
     "brandLight": {
       "sweepEnabled": true,
-      "sweepIntensity": 1,
+      "sweepIntensity": 3.8,
       "sweepAmplitude": 5,
       "sweepPeriod": 7.7,
-      "sweepHeight": -0.65,
+      "sweepHeight": 0,
       "sweepDistance": 2.85,
       "planeBrightness": 0.48,
       "planeEnvIntensity": 0.87,
       "planeRoughness": 0.62,
       "planeNormalScale": 1.7,
-      "sweepRange": 4.8,
+      "sweepRange": 5.2,
       "baseDim": 0.59
     }
   },

@@ -46,15 +46,15 @@
       <div id="countdown" class="hidden">3</div>
     </div>
 
-    <!-- RESULT: bare image + top-left logo + brand-colored bottom rectangle -->
+    <!-- RESULT: bare image + top-left/right logos + brand-colored bottom rectangle -->
     <div id="screen-result" class="screen hidden">
       <img id="result-image" src="" alt="" draggable="false" />
-      <img
-        id="result-logo"
-        src="/blk_next_chapter_of_growth.svg"
-        alt="Next Chapter of Growth"
-        draggable="false"
-      />
+      <!-- 左上 all_hands / 右上 coca_cola_j_and_k。space-between で両端寄せ、
+           余白・各ロゴのオフセットはリザルトのデバッガーから調整する。 -->
+      <div id="result-logos">
+        <img id="result-logo-left" class="result-logo" src="/all_hands.svg" alt="" draggable="false" />
+        <img id="result-logo-right" class="result-logo" src="/blk_coca_cola_j_and_k.svg" alt="" draggable="false" />
+      </div>
       <div id="result-rect"></div>
     </div>
 

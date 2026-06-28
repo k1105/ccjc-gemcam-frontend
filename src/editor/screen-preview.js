@@ -90,6 +90,7 @@ export class ScreenPreview {
     const brand = brands.list[0];
     els.image.src = makeResultTestImage(1280, 1600);
     els.rect.style.backgroundColor = brand?.themeColor || '#000';
+    overlay.applyResultLogos(this.ctx.choreo.data.result.logos); // ロゴ列の余白・オフセットを反映
     overlay.hideAll();
     gsap.set(els.image, { opacity: 1, y: 0 });
     gsap.set(els.logo, { opacity: 1, y: 0 });

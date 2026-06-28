@@ -29,6 +29,7 @@ export class ResultSequence extends Sequence {
     // 待機中に exit された場合は以降のアニメーションを開始しない
     if (this.bag.disposed) return;
     els.rect.style.backgroundColor = brand.themeColor || '#000';
+    overlay.applyResultLogos(rcfg.logos); // 上端ロゴ列の余白・オフセットを設定から反映
 
     // 初期状態リセット（前回アウトロの y 移動も戻す）
     gsap.set(els.image, { opacity: 0, y: 0 });

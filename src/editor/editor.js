@@ -121,10 +121,16 @@ export class Editor {
     });
     this._buildBottleRotationFolder(generateFolder, touch);
 
-    // リザルト（RESULT）: フェードイン / スタガー / 滞留 / アウトロ
+    // リザルト（RESULT）: フェードイン / 滞留 / アウトロ / ロゴ
     const resultFolder = this.gui.addFolder('リザルト');
     resultFolder.add({ replay: () => this.screenPreview.replay() }, 'replay').name('⟳ イントロ/アウトロを再生');
-    buildGuiFromObject(resultFolder, choreo.data.result, { onChange: touch });
+    // stagger / elementsStagger は現行シーケンスで未使用（後方互換で JSON には残すがパネルには出さない）。
+    // logos は専用フォルダ（余白・各ロゴのオフセットをライブ反映）で編集する。
+    buildGuiFromObject(resultFolder, choreo.data.result, {
+      onChange: touch,
+      skipKeys: ['stagger', 'elementsStagger', 'logos'],
+    });
+    this._buildResultLogosFolder(resultFolder, touch);
 
     // particles は専用タブ（独立トップレベル）。シェーダ uniform に焼かれるため
     // scene:true でプレビューの粒を再構築する
@@ -233,6 +239,41 @@ export class Editor {
     folder.add(r, 'y', 0, 1, 0.005).name('上 Y（画面高さに対する割合）').onChange(apply);
     folder.add(r, 'w', 0.05, 1, 0.005).name('幅（画面幅に対する割合）').onChange(apply);
     folder.add(r, 'h', 0.05, 1, 0.005).name('高さ（画面高さに対する割合）').onChange(apply);
+  }
+
+  /**
+   * リザルト上端ロゴ列（左: all_hands / 右: coca_cola_j_and_k）の編集フォルダ。
+   * 全体の高さ・上余白・左右余白に加え、各ロゴの上下左右オフセット（px）を調整できる。
+   * 変更はリザルトプレビュー表示中ならコンテナの CSS 変数へライブ反映する。
+   */
+  _buildResultLogosFolder(parent, touch) {
+    const { choreo, overlay } = this.ctx;
+    const c = (choreo.data.result.logos ??= {
+      height: 4.6,
+      marginTop: 6.2,
+      marginLeft: 5,
+      marginRight: 5,
+      left: { offsetX: 0, offsetY: 0 },
+      right: { offsetX: 0, offsetY: 0 },
+    });
+    c.left ??= { offsetX: 0, offsetY: 0 };
+    c.right ??= { offsetX: 0, offsetY: 0 };
+    const apply = () => {
+      // リザルトプレビュー表示中なら即反映（非表示でも CSS 変数の更新は無害）
+      overlay.applyResultLogos(c);
+      touch();
+    };
+    const folder = parent.addFolder('ロゴ（上端・左右）');
+    folder.add(c, 'height', 1, 30, 0.1).name('高さ（画面高さ%）').onChange(apply);
+    folder.add(c, 'marginTop', 0, 30, 0.1).name('上マージン（画面高さ%）').onChange(apply);
+    folder.add(c, 'marginLeft', 0, 30, 0.1).name('左マージン（画面幅%）').onChange(apply);
+    folder.add(c, 'marginRight', 0, 30, 0.1).name('右マージン（画面幅%）').onChange(apply);
+    const left = folder.addFolder('左ロゴ オフセット（px）');
+    left.add(c.left, 'offsetX', -300, 300, 1).name('左右（X）').onChange(apply);
+    left.add(c.left, 'offsetY', -300, 300, 1).name('上下（Y）').onChange(apply);
+    const right = folder.addFolder('右ロゴ オフセット（px）');
+    right.add(c.right, 'offsetX', -300, 300, 1).name('左右（X）').onChange(apply);
+    right.add(c.right, 'offsetY', -300, 300, 1).name('上下（Y）').onChange(apply);
   }
 
   /**

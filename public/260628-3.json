@@ -656,20 +656,6 @@
       "holdFull": 0.15,
       "settleDuration": 0.9,
       "settleEase": "power3.inOut"
-    },
-    "logos": {
-      "height": 4.6,
-      "marginTop": 6.2,
-      "marginLeft": 5,
-      "marginRight": 5,
-      "left": {
-        "offsetX": 0,
-        "offsetY": 0
-      },
-      "right": {
-        "offsetX": 0,
-        "offsetY": 0
-      }
     }
   },
   "scene": {

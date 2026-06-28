@@ -131,9 +131,12 @@ export class Editor {
     };
     buildGuiFromObject(particlesFolder, choreo.data.generate.particles, {
       labels: PARTICLE_LABELS,
-      skipKeys: ['grainImage'], // 画像はテキスト欄でなく専用のアップロードボタンで扱う
+      // 画像は専用アップロード、brandColors は飲料別カラーピッカーで扱う
+      skipKeys: ['grainImage', 'brandColors'],
       onChange: onParticlesChange,
     });
+    // 飲料ごとの粒の色（テーマカラーが暗くて見えない飲料の救済）。
+    this._buildBrandParticleColorFolder(particlesFolder, onParticlesChange);
     // 粒のベース画像（data URL）のアップロード / クリア（空=手続き的な丸スプライト）
     const pcfg = choreo.data.generate.particles;
     particlesFolder
@@ -190,6 +193,25 @@ export class Editor {
     folder.add(g, 'endOpacity', 0, 1, 0.01).name('終了の不透明度（下端）').onChange(apply);
     folder.add(g, 'length', 0, 100, 1).name('影の長さ（画面高さ%）').onChange(apply);
     folder.add(g, 'blur', 0, 100, 1).name('ブラー量（px）').onChange(apply);
+    folder.close();
+  }
+
+  /**
+   * 飲料ごとの「粒の色」編集フォルダ。choreo.data.generate.particles.brandColors
+   * （slug → hex）へカラーピッカーをバインドする。テーマカラーが黒など暗すぎて
+   * 粒が見えない飲料を、テーマカラー自体は変えずに粒だけ持ち上げるための上書き。
+   * 未設定の飲料はテーマカラーで初期化し、変更すれば即上書きが効く。
+   */
+  _buildBrandParticleColorFolder(parent, onChange) {
+    const { choreo, brands } = this.ctx;
+    const pcfg = choreo.data.generate.particles;
+    const bc = (pcfg.brandColors ??= {});
+    const folder = parent.addFolder('飲料ごとの粒の色');
+    for (const brand of brands.list) {
+      // ピッカーに初期値が要るので、未設定ならテーマカラーで埋める（=見た目は据え置き）
+      bc[brand.slug] ??= brand.themeColor || '#ffffff';
+      folder.addColor(bc, brand.slug).name(brand.label ?? brand.slug).onChange(onChange);
+    }
     folder.close();
   }
 

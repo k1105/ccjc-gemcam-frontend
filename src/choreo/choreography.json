@@ -90,7 +90,7 @@
     },
     "highlight": {
       "scale": 1.2,
-      "dimOpacity": 0.8,
+      "dimOpacity": 0.75,
       "duration": 0.4,
       "ease": "power2.out",
       "hold": 0.25
@@ -180,11 +180,23 @@
       "dissolveNoiseScale": 0.670000000000002,
       "dissolveEdge": 0.0600000000000001,
       "swapPixelRadius": 8.16,
-      "themeColor": "#ff0a0a",
+      "themeColor": "#ff3333",
       "sizeGrowBias": 1.33000000000001,
       "helixStartRadius": 0.55,
       "helixEndRadius": 0.38,
-      "helixRadiusShrinkDur": 3
+      "helixRadiusShrinkDur": 3,
+      "brandColors": {
+        "coca-cola-zero": "#3f0303",
+        "coca-cola": "#5c0000",
+        "ilohas": "#738334",
+        "aquarius": "#4751ff",
+        "yakan-no-mugicha": "#277582",
+        "sprite": "#06512a",
+        "ayataka": "#514c06",
+        "georgia": "#3e0d09",
+        "soken-bicha": "#205b56",
+        "toreta": "#648f14"
+      }
     },
     "photoDistance": 2.2,
     "bottlePos": [
@@ -527,57 +539,21 @@
     ],
     "sounds": [
       {
+        "id": "beep1",
+        "start": 6.967,
+        "sound": "sounds/se.mp3",
+        "freq": 880,
+        "duration": 0.12,
+        "volume": 1,
+        "enabled": true
+      },
+      {
         "id": "beep2",
-        "start": 4.483,
+        "start": 4.633,
         "sound": "sounds/soda-pour.mp3",
         "freq": 880,
-        "duration": 0.1,
-        "volume": 0.25,
-        "enabled": true
-      },
-      {
-        "id": "beep5",
-        "start": 7.1,
-        "sound": "sounds/whsh.mp3",
-        "freq": 880,
         "duration": 0.12,
-        "volume": 0.3,
-        "enabled": true
-      },
-      {
-        "id": "beep7",
-        "start": 20.733,
-        "sound": "sounds/tansan07.mp3",
-        "freq": 880,
-        "duration": 0.12,
-        "volume": 0.3,
-        "enabled": true
-      },
-      {
-        "id": "beep1",
-        "start": 9.733,
-        "sound": "sounds/tansan02.mp3",
-        "freq": 880,
-        "duration": 0.12,
-        "volume": 0.3,
-        "enabled": true
-      },
-      {
-        "id": "beep3",
-        "start": 15.35,
-        "sound": "sounds/tansan01.mp3",
-        "freq": 880,
-        "duration": 0.12,
-        "volume": 0.3,
-        "enabled": true
-      },
-      {
-        "id": "beep4",
-        "start": 15.783,
-        "sound": "sounds/whsh.mp3",
-        "freq": 880,
-        "duration": 0.12,
-        "volume": 0.3,
+        "volume": 0.1,
         "enabled": true
       }
     ]
@@ -653,9 +629,9 @@
       },
       "grade": {
         "enabled": true,
-        "saturation": 0.12,
-        "brightness": 0,
-        "contrast": 0,
+        "saturation": 0.3,
+        "brightness": 0.14,
+        "contrast": -0.01,
         "hue": 0
       }
     },
@@ -667,17 +643,17 @@
     },
     "brandLight": {
       "sweepEnabled": true,
-      "baseDim": 0.4,
-      "sweepIntensity": 8,
-      "sweepRange": 2.5,
-      "sweepAmplitude": 2.2,
-      "sweepPeriod": 5,
-      "sweepHeight": -0.3,
-      "sweepDistance": 2.9,
-      "planeBrightness": 0.32,
-      "planeEnvIntensity": 0.25,
+      "sweepIntensity": 1,
+      "sweepAmplitude": 5,
+      "sweepPeriod": 7.7,
+      "sweepHeight": -0.65,
+      "sweepDistance": 2.85,
+      "planeBrightness": 0.48,
+      "planeEnvIntensity": 0.87,
       "planeRoughness": 0.62,
-      "planeNormalScale": 1.8
+      "planeNormalScale": 1.7,
+      "sweepRange": 4.8,
+      "baseDim": 0.59
     }
   },
   "sfx": {

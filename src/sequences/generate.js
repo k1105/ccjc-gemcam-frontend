@@ -112,7 +112,9 @@ export class GenerateSequence extends Sequence {
       planeW,
       planeH,
       target: bottleCenter,
-      themeColor: brand.themeColor, // 色を落とす際にこの飲料のテーマカラーへ溶け込ませる
+      // 色を落とす際に溶け込ませる色。テーマカラーが暗すぎて粒が見えないブランド向けに
+      // particles.brandColors[slug]（エディタで調整可）で上書きできる。未設定ならテーマカラー。
+      themeColor: gcfg.particles.brandColors?.[brand.slug] || brand.themeColor,
     });
 
     // --- カメラ追従ターゲット登録 ---

@@ -88,13 +88,15 @@ export class PreviewStage {
 
   _buildParticles() {
     const { world, choreo } = this.ctx;
-    this.particles = new PhotoParticles(world, choreo.data.generate.particles);
+    const pcfg = choreo.data.generate.particles;
+    this.particles = new PhotoParticles(world, pcfg);
     this.particles.buildFromCanvas(this.canvas, {
       planeCenter: this.planeCenter,
       planeW: this.planeW,
       planeH: this.planeH,
       target: this.bottleCenter,
-      themeColor: this.brand?.themeColor, // 選択中ボトルのテーマ色を本番同様に反映
+      // 本番（generate.enter）と同じ解決順: ブランド個別の粒色 → テーマ色
+      themeColor: (this.brand && pcfg.brandColors?.[this.brand.slug]) || this.brand?.themeColor,
     });
     this.particles.points.visible = false;
     world.scene.add(this.particles.points);

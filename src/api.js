@@ -2,7 +2,10 @@
  * ブース用バックエンド (ccjc/server) を呼び出して実画像を生成するサービス。
  * 旧 MockApiService と同じ generateToyImage(brand, snapshotDataUrl, onProgress) インタフェースを維持。
  */
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8787';
+import { isAuthRequired } from './core/auth-env.js';
+
+// Vercel等の同一オリジン運用では VITE_API_BASE='' を設定する（?? なら空文字はフォールバックしない）
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787';
 
 export class ApiService {
   /**
@@ -20,9 +23,15 @@ export class ApiService {
     }, 400);
 
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (isAuthRequired()) {
+        const { getCurrentIdToken } = await import('./core/auth-gate.js');
+        const idToken = await getCurrentIdToken();
+        if (idToken) headers.Authorization = `Bearer ${idToken}`;
+      }
       const res = await fetch(`${API_BASE}/api/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ brand: brandSlug, image: snapshotDataUrl }),
       });
 

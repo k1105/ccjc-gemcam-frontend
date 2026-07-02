@@ -372,3 +372,46 @@ body.editor-active * {
   pointer-events: none;
   z-index: 100;
 }
+
+/* --- login gate（Vercelデプロイ時のみ）--- */
+#login-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 200; /* 他の全レイヤーより上、アプリ本体をブロックする */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  background: #0a0a0a;
+  color: #fff;
+  text-align: center;
+  padding: 2rem;
+}
+
+#login-gate-title {
+  font-size: 1.4rem;
+  letter-spacing: 0.05em;
+}
+
+#login-gate-signin,
+#login-gate-signout {
+  font-size: 1rem;
+  padding: 0.7em 1.6em;
+  border-radius: 999px;
+  border: 1px solid #fff;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+#login-gate-signin:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#login-gate-status {
+  min-height: 1.2em;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}

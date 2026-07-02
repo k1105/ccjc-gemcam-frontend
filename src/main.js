@@ -1,4 +1,5 @@
 import './style.css';
+import { isAuthRequired } from './core/auth-env.js';
 import { World } from './core/world.js';
 import { SequenceManager } from './core/sequence-manager.js';
 import { Keyboard } from './core/keyboard.js';
@@ -19,6 +20,13 @@ import { GenerateSequence } from './sequences/generate.js';
 import { ResultSequence } from './sequences/result.js';
 
 async function boot() {
+  // Vercelデプロイ時のみ有効（VITE_REQUIRE_AUTH=1）。firebaseはこの時だけ動的importする
+  // （ローカル会場PCビルドのバンドルにfirebaseを含めないため）。
+  if (isAuthRequired()) {
+    const { waitForAllowedUser } = await import('./core/auth-gate.js');
+    await waitForAllowedUser();
+  }
+
   const world = new World('canvas-container');
   const choreo = await Choreo.load();
   const brands = new Brands();
@@ -67,7 +75,8 @@ async function boot() {
       return true;
     }
     // Ctrl+K: APIキー設定パネル（lazy import — 通常運用ではチャンク未ロード）
-    if (key === 'K' && e.ctrlKey) {
+    // Vercelデプロイ（VITE_REQUIRE_AUTH=1）には /api/keys が存在しないため無効化する
+    if (key === 'K' && e.ctrlKey && !isAuthRequired()) {
       e.preventDefault(); // ブラウザ既定（アドレスバー等）を抑止
       if (keySettings) {
         keySettings.toggle();

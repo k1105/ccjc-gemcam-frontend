@@ -1,4 +1,5 @@
-# デプロイに不要な大容量・サーバ専用ファイル
+# デプロイに不要な大容量ファイル
+# server/ は /api Functions から import されるため除外しない
 node_modules
 dist
 .smoke
@@ -10,4 +11,3 @@ products_all.zip
 .env
 .env.*
 scripts
-server

@@ -13,6 +13,14 @@
     />
   </head>
   <body>
+    <!-- ログインゲート（Vercelデプロイ時のみ VITE_REQUIRE_AUTH=1 で有効化。auth-gate.js が表示/非表示を制御） -->
+    <div id="login-gate" class="hidden">
+      <p id="login-gate-title">CCJC Experience</p>
+      <button id="login-gate-signin" type="button">Googleでログイン</button>
+      <button id="login-gate-signout" type="button" class="hidden">サインアウト</button>
+      <p id="login-gate-status"></p>
+    </div>
+
     <!-- Fullscreen 3D canvas -->
     <div id="canvas-container"></div>
 
